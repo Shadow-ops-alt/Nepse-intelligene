@@ -1,0 +1,38 @@
+{
+  "name": "nepse-stock-terminal",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.16.1",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
+    "dev": "concurrently -k -n api,web -c cyan,magenta \"pnpm dev:api\" \"pnpm dev:web\"",
+    "dev:api": "pnpm --filter @stock/api start",
+    "dev:web": "pnpm --filter @stock/desktop dev",
+    "build:web": "pnpm --filter @stock/desktop build",
+    "start": "pnpm build:web && pnpm --filter @stock/api start",
+    "desktop": "pnpm --filter @stock/desktop electron:start",
+    "desktop:package": "pnpm --filter @stock/desktop electron:package",
+    "phase0:providers": "pnpm --filter @stock/validation exec tsx src/cli.ts providers",
+    "phase0:validate": "pnpm --filter @stock/validation exec tsx src/cli.ts validate",
+    "personal:sync": "pnpm --filter @stock/personal exec tsx src/cli.ts sync",
+    "personal:acquire": "pnpm --filter @stock/personal exec tsx src/cli.ts acquire",
+    "personal:update": "pnpm --filter @stock/personal exec tsx src/cli.ts update",
+    "personal:status": "pnpm --filter @stock/personal exec tsx src/cli.ts status",
+    "personal:backup": "pnpm --filter @stock/personal exec tsx src/cli.ts backup",
+    "personal:restore": "pnpm --filter @stock/personal exec tsx src/cli.ts restore",
+    "personal:candles": "pnpm --filter @stock/personal exec tsx src/cli.ts candles",
+    "personal:analyze": "pnpm --filter @stock/personal exec tsx src/cli.ts analyze"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "concurrently": "^9.2.1",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.1.0"
+  }
+}
