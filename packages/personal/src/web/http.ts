@@ -246,13 +246,16 @@ export class WebClient {
   async getText(
     url: string,
     headers: Record<string, string> = {},
+    options: { bypassCache?: boolean } = {},
   ): Promise<FetchResult> {
     const extraKeys = Object.keys(headers).sort();
     const cacheKey =
       extraKeys.length === 0
         ? url
         : `${url}#${extraKeys.map((key) => `${key}=${headers[key]}`).join("&")}`;
-    const hit = this.cached(cacheKey);
+    // A cached page cannot be used to start a session: its embedded CSRF
+    // token has no matching session cookie in this process.
+    const hit = options.bypassCache ? null : this.cached(cacheKey);
     if (hit) return hit;
 
     const host = hostOf(url);

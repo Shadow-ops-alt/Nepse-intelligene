@@ -895,6 +895,7 @@ export async function acquireCompanyDetails(
     let ssProfile: ShareSansarCompanyProfile | null = null;
     let mlProfile: MerolaganiCompanyProfile | null = null;
     let ssHtml: string | null = null;
+    let ssPageCached = false;
     let mlHtml: string | null = null;
     let fetchedAt = runStartedAt.toISOString();
 
@@ -903,6 +904,7 @@ export async function acquireCompanyDetails(
     try {
       const page = await client.getText(ssUrl);
       ssHtml = page.text;
+      ssPageCached = page.cached;
       fetchedAt = page.fetchedAt;
       ssProfile = parseShareSansarProfile(page.text, symbol, ssUrl);
     } catch (error) {
@@ -932,6 +934,22 @@ export async function acquireCompanyDetails(
 
     if (options.statements !== false && ssHtml) {
       options.onProgress?.(`company details ${symbol}: statements and events`);
+      // The detail tabs are POSTs that need the page's CSRF token *and* the
+      // session cookie issued with it. A page served from the cache carries a
+      // token without that cookie and every tab answers HTTP 419, so fetch
+      // the page live once before calling the tabs.
+      if (ssPageCached) {
+        try {
+          const fresh = await client.getText(ssUrl, {}, { bypassCache: true });
+          ssHtml = fresh.text;
+        } catch (error) {
+          failures.push({
+            symbol,
+            source: "sharesansar",
+            error: `refreshing the company page for detail tabs: ${error instanceof Error ? error.message : String(error)}`,
+          });
+        }
+      }
       const supplemental = await fetchCompanyTabs(client, symbol, ssUrl, ssHtml);
       failures.push(...supplemental.failures);
       if (supplemental.report) {
