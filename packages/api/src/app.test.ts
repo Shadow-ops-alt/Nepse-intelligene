@@ -754,6 +754,20 @@ describe("api server", () => {
       period: "FY083-084",
       metrics: { eps: { metric: "eps", value: 33.89, unit: "currency" } },
     }));
+    // A quarterly statement in history carries ROE/NPL that the latest
+    // (key-ratio) snapshot lacks; it must be merged with its own period.
+    store.upsertSnapshot("fundamentalsHistory", "NABIL", envelope([
+      {
+        symbol: "NABIL",
+        asOf: "2026-11-10T00:00:00.000Z",
+        period: "1st Quarter 2083/2084",
+        metrics: {
+          "statement.roe": { metric: "statement.roe", value: 12.4, unit: "percent" },
+          "statement.npl": { metric: "statement.npl", value: 2.1, unit: "percent" },
+          eps: { metric: "eps", value: 99, unit: "currency" },
+        },
+      },
+    ]));
     store.upsertSnapshot("corporateActions", "NABIL", envelope([
       { symbol: "NABIL", type: "cashDividend", ratio: "10.8%", value: 10.8 },
       { symbol: "NABIL", type: "bonusShare", ratio: "5%", value: 5 },
@@ -785,6 +799,18 @@ describe("api server", () => {
       expect(fundamentals.providerId).toBe("free-source");
       expect(fundamentals.rows.map((row) => row.symbol)).toEqual(["NABIL", "NGF"]);
       expect(fundamentals.rows[0]?.metrics.eps?.value).toBe(33.89);
+      const nabil = fundamentals.rows[0] as unknown as {
+        metrics: Record<string, { value: number; period?: string }>;
+        filledFromHistory?: string[];
+      };
+      expect(nabil.metrics["statement.roe"]).toMatchObject({
+        value: 12.4,
+        period: "1st Quarter 2083/2084",
+      });
+      expect(nabil.metrics["statement.npl"]?.value).toBe(2.1);
+      // The latest snapshot's own value wins over history.
+      expect(nabil.metrics.eps?.value).toBe(33.89);
+      expect(nabil.filledFromHistory).toEqual(["statement.roe", "statement.npl"]);
       expect(fundamentals.provenance?.classification).toBe("UNVERIFIED");
       expect(fundamentals.provenance?.state).not.toBe("live");
       expect(fundamentals.dataState.total).toBe(2);

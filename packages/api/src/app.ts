@@ -1090,12 +1090,55 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             (best, view) => (!best || view.fetchedAt > best.fetchedAt ? view : best),
             null,
           );
+          // The stored "latest" snapshot is one period (e.g. Merolagani key
+          // ratios), so statement-only metrics such as ROE/ROA/NPL from a
+          // quarterly report would be missing. Fill each metric the latest
+          // lacks from the newest history period that has it; every filled
+          // value keeps its own period so nothing is relabelled.
+          type Metric = { period?: string; reportedAt?: string } & Record<string, unknown>;
+          type Snapshot = {
+            symbol?: string;
+            period?: string;
+            asOf?: string;
+            reportedAt?: string;
+            metrics?: Record<string, Metric>;
+          };
+          const histories = new Map<string, Snapshot[]>();
+          for (const entry of store.listSnapshotsWithProvenance<Snapshot[]>(
+            providerId,
+            "fundamentalsHistory",
+          )) {
+            if (Array.isArray(entry.data)) histories.set(entry.naturalKey, entry.data);
+          }
+          const rank = (snapshot: Snapshot) => snapshot.reportedAt ?? snapshot.asOf ?? "";
+          const rows = entries.map((entry) => {
+            const base = entry.data as Snapshot;
+            const symbol = base.symbol ?? entry.naturalKey;
+            const metrics: Record<string, Metric> = {};
+            for (const [key, metric] of Object.entries(base.metrics ?? {})) {
+              metrics[key] = { ...metric, period: metric.period ?? base.period };
+            }
+            const history = [...(histories.get(entry.naturalKey) ?? [])].sort((a, b) =>
+              rank(b).localeCompare(rank(a)),
+            );
+            const filled: string[] = [];
+            for (const snapshot of history) {
+              for (const [key, metric] of Object.entries(snapshot.metrics ?? {})) {
+                if (metrics[key] || metric === null || metric.value === null) continue;
+                metrics[key] = { ...metric, period: metric.period ?? snapshot.period };
+                filled.push(key);
+              }
+            }
+            return {
+              ...base,
+              symbol,
+              metrics,
+              ...(filled.length > 0 ? { filledFromHistory: filled } : {}),
+            };
+          });
           sendJson(response, 200, {
             providerId,
-            rows: entries.map((entry) => ({
-              ...entry.data,
-              symbol: entry.data.symbol ?? entry.naturalKey,
-            })),
+            rows,
             provenance: newest,
             dataState: summarizeProvenance(views),
           });
