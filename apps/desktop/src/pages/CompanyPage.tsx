@@ -307,8 +307,6 @@ export function CompanyPage({
             />
           </div>
 
-          {companyDetail}
-
           <div className="grid main-side">
             <Card
               title="Price"
@@ -396,6 +394,8 @@ export function CompanyPage({
               </Card>
             </div>
           </div>
+
+          {companyDetail}
 
           <Card>
             <Tabs<DetailTab>

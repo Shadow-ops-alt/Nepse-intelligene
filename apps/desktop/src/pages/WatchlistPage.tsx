@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { returnCorrelation } from "@stock/analytics";
 import { api, formatNumber } from "../api";
 import { useApi } from "../hooks";
@@ -21,6 +21,7 @@ import {
   Sparkline,
   Spinner,
   heatStyle,
+  formatTimestamp,
 } from "../components/ui";
 
 interface WatchlistResponse {
@@ -75,6 +76,8 @@ export function WatchlistPage({
   const companiesState = useApi<CompaniesResponse>("/api/companies");
   const screenerState = useApi<ScreenerResponse>("/api/screener");
   const [busy, setBusy] = useState<string | null>(null);
+  const [draft, setDraft] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
 
   const symbols = watchState.data?.symbols ?? [];
   const { sets, loading: candlesLoading } = useCandleSets(symbols);
@@ -119,6 +122,28 @@ export function WatchlistPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sets, matrixSymbols.join(",")]);
 
+  async function add(event: FormEvent) {
+    event.preventDefault();
+    const symbol = draft.trim().toUpperCase();
+    if (!symbol) return;
+    if (!companyBySymbol.has(symbol)) {
+      setAddError(`${symbol} is not in the company master`);
+      return;
+    }
+    setAddError(null);
+    setBusy(symbol);
+    try {
+      await api<WatchlistResponse>("/api/watchlist", {
+        method: "POST",
+        body: JSON.stringify({ symbol, action: "add" }),
+      });
+      setDraft("");
+      watchState.reload();
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function remove(symbol: string) {
     setBusy(symbol);
     try {
@@ -140,18 +165,44 @@ export function WatchlistPage({
         title="Watchlist"
         subtitle={`${symbols.length} symbol${symbols.length === 1 ? "" : "s"} stored locally`}
         action={
-          quotesState.data ? (
-            <DataStateBadge
-              state={quotesState.data.dataState.state}
-              classification={quotesState.data.dataState.classification}
+          <form className="row" onSubmit={(event) => void add(event)} aria-label="Add to watchlist">
+            <input
+              list="watchlist-symbols"
+              value={draft}
+              placeholder="Add symbol, e.g. NABIL"
+              aria-label="Symbol to add"
+              onChange={(event) => {
+                setDraft(event.target.value.toUpperCase());
+                setAddError(null);
+              }}
+              style={{ width: 180 }}
             />
-          ) : undefined
+            <datalist id="watchlist-symbols">
+              {(companiesState.data?.companies ?? [])
+                .filter((company) => company.status === "active")
+                .map((company) => (
+                  <option key={company.symbol} value={company.symbol}>
+                    {company.name}
+                  </option>
+                ))}
+            </datalist>
+            <button className="button button-small" disabled={!draft.trim() || busy !== null}>
+              Add
+            </button>
+            {quotesState.data && (
+              <DataStateBadge
+                state={quotesState.data.dataState.state}
+                classification={quotesState.data.dataState.classification}
+              />
+            )}
+          </form>
         }
         footer="Returns, RSI, volatility and the signal tally are derived from stored end-of-day closes."
       >
+        {addError && <p className="form-error" style={{ marginTop: 0, marginBottom: 10 }}>{addError}</p>}
         {symbols.length === 0 ? (
           <EmptyState title="Your watchlist is empty">
-            Open a company (Ctrl K, type a symbol) and press the star.
+            Type a symbol in the box above, or press ☆ on any company page.
           </EmptyState>
         ) : (
           <div className="table-scroll">
@@ -168,7 +219,7 @@ export function WatchlistPage({
                   <th className="right">RSI</th>
                   <th className="right">Vol 3M</th>
                   <th>Signal</th>
-                  <th>As of / state</th>
+                  <th>State</th>
                   <th />
                 </tr>
               </thead>
@@ -216,16 +267,12 @@ export function WatchlistPage({
                       </td>
                       <td>
                         {quote ? (
-                          <>
-                            <AsOf value={entry?.asOf ?? quote.asOf} ageSeconds={entry?.ageSeconds} />{" "}
-                            {entry && (
-                              <DataStateBadge
-                                state={entry.state}
-                                classification={entry.classification}
-                                showClassification={false}
-                              />
-                            )}
-                          </>
+                          <DataStateBadge
+                            state={entry?.state ?? "eod"}
+                            classification={entry?.classification}
+                            showClassification={false}
+                            title={`as of ${formatTimestamp(entry?.asOf ?? quote.asOf)}`}
+                          />
                         ) : screen ? (
                           <>
                             <span className="muted small">last close {screen.to}</span>{" "}

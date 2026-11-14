@@ -41,7 +41,8 @@ const INDEX_OVERLAYS: Overlay[] = ["sma50", "sma200"];
 const INDEX_STUDIES: Study[] = [];
 import { nptDate } from "../lib";
 
-type MoverTab = "gainers" | "losers" | "turnover" | "volume";
+type MoverTab = "gainers" | "losers" | "turnover" | "volume" | "watchlist";
+type DetailTab = "market" | "patterns" | "floorsheet" | "issues";
 type MarketSortKey =
   | "symbol"
   | "sector"
@@ -67,6 +68,8 @@ export function MarketPage({
   const floorsheetState = useApi<FloorsheetResponse>("/api/floorsheet");
 
   const [moverTab, setMoverTab] = useState<MoverTab>("gainers");
+  const [detailTab, setDetailTab] = useState<DetailTab>("market");
+  const watchState = useApi<{ symbols: string[] }>("/api/watchlist");
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
@@ -214,8 +217,14 @@ export function MarketPage({
     if (moverTab === "turnover") {
       return list.sort((a, b) => b.turnover - a.turnover).slice(0, 10);
     }
+    if (moverTab === "watchlist") {
+      const watched = new Set(watchState.data?.symbols ?? []);
+      return list
+        .filter((q) => watched.has(q.symbol))
+        .sort((a, b) => b.changePercent - a.changePercent);
+    }
     return list.sort((a, b) => b.volume - a.volume).slice(0, 10);
-  }, [sessionQuotes, moverTab]);
+  }, [sessionQuotes, moverTab, watchState.data]);
 
   const tableRows = useMemo(() => {
     const needle = search.trim().toUpperCase();
@@ -301,7 +310,7 @@ export function MarketPage({
           />
         </Stat>
         <Stat
-          label="Market turnover"
+          label="Turnover"
           value={reportedTurnover !== null ? `Rs ${formatCompact(reportedTurnover)}` : "—"}
           badge={
             reportedTurnover !== null ? <Badge tone="warn">unverified</Badge> : undefined
@@ -349,7 +358,7 @@ export function MarketPage({
           />
         </Stat>
         <Stat
-          label="Median change"
+          label="Median move"
           value={<Delta value={marketBreadth.medianChangePercent} />}
           badge={<Badge tone="info">derived</Badge>}
           hint={
@@ -464,12 +473,17 @@ export function MarketPage({
               { value: "losers", label: "Losers" },
               { value: "turnover", label: "Turnover" },
               { value: "volume", label: "Volume" },
+              { value: "watchlist", label: "★ Mine", count: watchState.data?.symbols.length ?? 0 },
             ]}
           />
           {quotesState.loading ? (
             <Spinner />
           ) : movers.length === 0 ? (
-            <EmptyState title="Nothing to rank" />
+            <EmptyState title={moverTab === "watchlist" ? "Your watchlist is empty" : "Nothing to rank"}>
+              {moverTab === "watchlist"
+                ? "Press ☆ on any company page, or add symbols on the Watchlist page."
+                : undefined}
+            </EmptyState>
           ) : (
             <table className="table table-fixed">
               <tbody>
@@ -572,193 +586,21 @@ export function MarketPage({
         )}
       </Card>
 
-      <Card
-        title="Latest floorsheet"
-        subtitle={
-          floorsheetState.data?.date
-            ? `Largest contracts on ${floorsheetState.data.date}`
-            : "Most recent public floorsheet"
-        }
-        action={<Badge tone="warn">unofficial</Badge>}
-        footer="Only the latest trading day is published on the free public page. Broker flows are aggregated from these stored trades, never fetched separately."
-      >
-        {floorsheetState.loading ? (
-          <Spinner label="Loading floorsheet" />
-        ) : floorsheetTop.length === 0 ? (
-          <EmptyState title="No floorsheet stored">
-            Run <code>pnpm personal:update</code> with the public web datasets
-            enabled.
-          </EmptyState>
-        ) : (
-          <div className="table-scroll short">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Buyer</th>
-                  <th>Seller</th>
-                  <th className="right">Quantity</th>
-                  <th className="right">Rate</th>
-                  <th className="right">Amount</th>
-                </tr>
-              </thead>
-              <tbody>
-                {floorsheetTop.map((trade) => (
-                  <tr key={trade.contractId}>
-                    <td>
-                      <strong>{trade.symbol}</strong>
-                    </td>
-                    <td className="muted">{trade.buyerBroker}</td>
-                    <td className="muted">{trade.sellerBroker}</td>
-                    <td className="right">{formatNumber(trade.quantity, 0)}</td>
-                    <td className="right">{formatNumber(trade.rate)}</td>
-                    <td className="right">Rs {formatCompact(trade.amount)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
-      <div className="grid main-side">
-        <Card
-          title="IPO & issue pipeline"
-          subtitle="Upcoming and recent public issues"
-          action={<Badge tone="warn">unofficial</Badge>}
-          footer="ShareSansar's upcoming-issue list. Dates and units are shown as published; missing fields stay blank."
-        >
-          {iposState.loading ? (
-            <Spinner label="Loading issue pipeline" />
-          ) : ipos.length === 0 ? (
-            <EmptyState title="No issues stored" />
-          ) : (
-            <div className="table-scroll short">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Company</th>
-                    <th>Type</th>
-                    <th>Application date</th>
-                    <th className="right">Units</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {ipos.slice(0, 20).map((ipo) => (
-                    <tr key={ipo.id}>
-                      <td>
-                        <strong>{ipo.symbol ?? ipo.companyName}</strong>
-                        <span className="cell-sub">{ipo.companyName}</span>
-                      </td>
-                      <td>
-                        <Badge tone="info">{ipo.type}</Badge>
-                      </td>
-                      <td className="muted">{ipo.openDate ?? "—"}</td>
-                      <td className="right">
-                        {ipo.units === undefined ? "—" : formatNumber(ipo.units, 0)}
-                      </td>
-                      <td className="muted">{ipo.status}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Card>
-
-        <Card
-          title="Market news"
-          subtitle="Latest headlines from the public sources"
-          action={<Badge tone="warn">unofficial</Badge>}
-        >
-          {newsState.loading ? (
-            <Spinner label="Loading news" />
-          ) : newsItems.length === 0 ? (
-            <EmptyState title="No news stored" />
-          ) : (
-            <ul className="news-list">
-              {newsItems.slice(0, 12).map((item) => (
-                <li key={item.id}>
-                  <a href={item.url} target="_blank" rel="noreferrer">
-                    {item.title}
-                  </a>
-                  <span className="muted small">
-                    {" "}
-                    · {item.source} · {item.publishedAt.slice(0, 16).replace("T", " ")}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+      <div className="section-tabs" role="region" aria-label="Market detail">
+        <Tabs<DetailTab>
+          label="Market detail"
+          value={detailTab}
+          onChange={setDetailTab}
+          items={[
+            { value: "market", label: "All stocks", count: sessionQuotes.length },
+            { value: "patterns", label: "Candlestick signals" },
+            { value: "floorsheet", label: "Floorsheet" },
+            { value: "issues", label: "IPO & news" },
+          ]}
+        />
       </div>
 
-      <Card
-        title="Candlestick signals on the last session"
-        subtitle={
-          screenerState.loading
-            ? "Scanning stored candles…"
-            : `Active equities · ${todaysPatterns.filter((item) => item.pattern.bias === "bullish").length} bullish and ${todaysPatterns.filter((item) => item.pattern.bias === "bearish").length} bearish patterns completed on ${latestSession ?? "the latest session"}`
-        }
-        action={<Badge tone="info">derived</Badge>}
-        footer={
-          <>
-            Patterns are detected geometrically from each session’s open, high,
-            low and close plus the prior six-session trend. They describe the
-            past; they are not forecasts or advice. Thinly traded scrips with no
-            daily range never match.
-          </>
-        }
-      >
-        {screenerState.loading ? (
-          <Spinner label="Scanning stored candles" />
-        ) : todaysPatterns.length === 0 ? (
-          <EmptyState title="No directional patterns on the last session" />
-        ) : (
-          <div className="table-scroll short">
-            <table className="table">
-              <thead>
-                <tr>
-                  <th>Symbol</th>
-                  <th>Pattern</th>
-                  <th className="right">Close</th>
-                  <th className="right">RSI 14</th>
-                  <th>Trend</th>
-                  <th>Signal tally</th>
-                </tr>
-              </thead>
-              <tbody>
-                {todaysPatterns.map(({ row, pattern }) => (
-                  <ClickableRow
-                    key={`${row.symbol}-${pattern.id}`}
-                    onClick={() => onOpenSymbol(row.symbol)}
-                  >
-                    <td>
-                      <strong>{row.symbol}</strong>
-                      <span className="cell-sub">
-                        {companyBySymbol.get(row.symbol)?.name ?? ""}
-                      </span>
-                    </td>
-                    <td>
-                      <Badge tone={pattern.bias === "bullish" ? "good" : "bad"}>
-                        {pattern.bias === "bullish" ? "▲" : "▼"} {pattern.name}
-                      </Badge>
-                    </td>
-                    <td className="right">{formatNumber(row.lastClose)}</td>
-                    <td className="right">{formatNumber(row.rsi14)}</td>
-                    <td className="muted">{row.trend ?? "—"}</td>
-                    <td>
-                      <RatingBadge rating={row.signalRating} />
-                    </td>
-                  </ClickableRow>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Card>
-
+      {detailTab === "market" && (
       <Card
         title="Market"
         subtitle={`${sorted.length} of ${sessionQuotes.length} closes${
@@ -848,6 +690,200 @@ export function MarketPage({
           </div>
         )}
       </Card>
+      )}
+
+      {detailTab === "patterns" && (
+      <Card
+        title="Candlestick signals on the last session"
+        subtitle={
+          screenerState.loading
+            ? "Scanning stored candles…"
+            : `Active equities · ${todaysPatterns.filter((item) => item.pattern.bias === "bullish").length} bullish and ${todaysPatterns.filter((item) => item.pattern.bias === "bearish").length} bearish patterns completed on ${latestSession ?? "the latest session"}`
+        }
+        action={<Badge tone="info">derived</Badge>}
+        footer={
+          <>
+            Patterns are detected geometrically from each session’s open, high,
+            low and close plus the prior six-session trend. They describe the
+            past; they are not forecasts or advice. Thinly traded scrips with no
+            daily range never match.
+          </>
+        }
+      >
+        {screenerState.loading ? (
+          <Spinner label="Scanning stored candles" />
+        ) : todaysPatterns.length === 0 ? (
+          <EmptyState title="No directional patterns on the last session" />
+        ) : (
+          <div className="table-scroll short">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Pattern</th>
+                  <th className="right">Close</th>
+                  <th className="right">RSI 14</th>
+                  <th>Trend</th>
+                  <th>Signal tally</th>
+                </tr>
+              </thead>
+              <tbody>
+                {todaysPatterns.map(({ row, pattern }) => (
+                  <ClickableRow
+                    key={`${row.symbol}-${pattern.id}`}
+                    onClick={() => onOpenSymbol(row.symbol)}
+                  >
+                    <td>
+                      <strong>{row.symbol}</strong>
+                      <span className="cell-sub">
+                        {companyBySymbol.get(row.symbol)?.name ?? ""}
+                      </span>
+                    </td>
+                    <td>
+                      <Badge tone={pattern.bias === "bullish" ? "good" : "bad"}>
+                        {pattern.bias === "bullish" ? "▲" : "▼"} {pattern.name}
+                      </Badge>
+                    </td>
+                    <td className="right">{formatNumber(row.lastClose)}</td>
+                    <td className="right">{formatNumber(row.rsi14)}</td>
+                    <td className="muted">{row.trend ?? "—"}</td>
+                    <td>
+                      <RatingBadge rating={row.signalRating} />
+                    </td>
+                  </ClickableRow>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      )}
+
+      {detailTab === "floorsheet" && (
+      <Card
+        title="Latest floorsheet"
+        subtitle={
+          floorsheetState.data?.date
+            ? `Largest contracts on ${floorsheetState.data.date}`
+            : "Most recent public floorsheet"
+        }
+        action={<Badge tone="warn">unofficial</Badge>}
+        footer="Only the latest trading day is published on the free public page. Broker flows are aggregated from these stored trades, never fetched separately."
+      >
+        {floorsheetState.loading ? (
+          <Spinner label="Loading floorsheet" />
+        ) : floorsheetTop.length === 0 ? (
+          <EmptyState title="No floorsheet stored">
+            Run <code>pnpm personal:update</code> with the public web datasets
+            enabled.
+          </EmptyState>
+        ) : (
+          <div className="table-scroll short">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Buyer</th>
+                  <th>Seller</th>
+                  <th className="right">Quantity</th>
+                  <th className="right">Rate</th>
+                  <th className="right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {floorsheetTop.map((trade) => (
+                  <tr key={trade.contractId}>
+                    <td>
+                      <strong>{trade.symbol}</strong>
+                    </td>
+                    <td className="muted">{trade.buyerBroker}</td>
+                    <td className="muted">{trade.sellerBroker}</td>
+                    <td className="right">{formatNumber(trade.quantity, 0)}</td>
+                    <td className="right">{formatNumber(trade.rate)}</td>
+                    <td className="right">Rs {formatCompact(trade.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+      )}
+
+      {detailTab === "issues" && (
+      <div className="grid main-side">
+        <Card
+          title="IPO & issue pipeline"
+          subtitle="Upcoming and recent public issues"
+          action={<Badge tone="warn">unofficial</Badge>}
+          footer="ShareSansar's upcoming-issue list. Dates and units are shown as published; missing fields stay blank."
+        >
+          {iposState.loading ? (
+            <Spinner label="Loading issue pipeline" />
+          ) : ipos.length === 0 ? (
+            <EmptyState title="No issues stored" />
+          ) : (
+            <div className="table-scroll short">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Type</th>
+                    <th>Application date</th>
+                    <th className="right">Units</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ipos.slice(0, 20).map((ipo) => (
+                    <tr key={ipo.id}>
+                      <td>
+                        <strong>{ipo.symbol ?? ipo.companyName}</strong>
+                        <span className="cell-sub">{ipo.companyName}</span>
+                      </td>
+                      <td>
+                        <Badge tone="info">{ipo.type}</Badge>
+                      </td>
+                      <td className="muted">{ipo.openDate ?? "—"}</td>
+                      <td className="right">
+                        {ipo.units === undefined ? "—" : formatNumber(ipo.units, 0)}
+                      </td>
+                      <td className="muted">{ipo.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        <Card
+          title="Market news"
+          subtitle="Latest headlines from the public sources"
+          action={<Badge tone="warn">unofficial</Badge>}
+        >
+          {newsState.loading ? (
+            <Spinner label="Loading news" />
+          ) : newsItems.length === 0 ? (
+            <EmptyState title="No news stored" />
+          ) : (
+            <ul className="news-list">
+              {newsItems.slice(0, 12).map((item) => (
+                <li key={item.id}>
+                  <a href={item.url} target="_blank" rel="noreferrer">
+                    {item.title}
+                  </a>
+                  <span className="muted small">
+                    {" "}
+                    · {item.source} · {item.publishedAt.slice(0, 16).replace("T", " ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
+      )}
     </div>
   );
 }

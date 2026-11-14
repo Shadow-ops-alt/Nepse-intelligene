@@ -317,6 +317,7 @@ export function PriceChart({
   const [magnet, setMagnet] = useState(true);
   const [drawingsVisible, setDrawingsVisible] = useState(true);
   const [drawCount, setDrawCount] = useState(0);
+  const [drawOpen, setDrawOpen] = useState(false);
   const drawCommands = useRef<{
     undo: () => void;
     deleteSelected: () => void;
@@ -930,6 +931,21 @@ export function PriceChart({
               )}
             </>
           )}
+          {drawingKey !== null && variant === "candles" && (
+            <button
+              type="button"
+              className="toggle-chip"
+              aria-pressed={drawOpen}
+              aria-expanded={drawOpen}
+              title="Drawing tools: lines, zones, Fib, measure, notes"
+              onClick={() => {
+                setDrawOpen((open) => !open);
+                setTool("cursor");
+              }}
+            >
+              ✎ Draw{drawCount > 0 ? ` · ${drawCount}` : ""}
+            </button>
+          )}
           <button
             type="button"
             className="toggle-chip"
@@ -1013,7 +1029,7 @@ export function PriceChart({
         </div>
       )}
 
-      {drawingEnabled && (
+      {drawingEnabled && drawOpen && (
         <div className="draw-toolbar" role="toolbar" aria-label="Drawing tools">
           {DRAW_TOOLS.map(({ tool: item, glyph }) => (
             <button

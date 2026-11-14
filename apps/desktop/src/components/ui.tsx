@@ -153,7 +153,12 @@ export function Card({
         </header>
       )}
       {children}
-      {footer && <div className="card-footer">{footer}</div>}
+      {footer && (
+        <details className="card-footer">
+          <summary>About this data</summary>
+          <div className="card-footer-body">{footer}</div>
+        </details>
+      )}
     </section>
   );
 }
@@ -176,7 +181,7 @@ export function Stat({
   return (
     <div className="stat">
       <span className="stat-label">
-        <span>{label}</span>
+        <span className="stat-label-text" title={label}>{label}</span>
         {badge}
       </span>
       <span className={`stat-value ${tone ? `tone-${tone}` : ""}`}>

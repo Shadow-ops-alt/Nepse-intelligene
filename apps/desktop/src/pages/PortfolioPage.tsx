@@ -12,6 +12,7 @@ import {
   Spinner,
   Stat,
   formatTimestamp,
+  toneOf,
 } from "../components/ui";
 
 function today(): string {
@@ -120,18 +121,18 @@ export function PortfolioPage({
               : "—"
           }
           tone={
-            (totals?.unrealizedPnl ?? 0) >= 0 ? "up" : "down"
+            totals && totals.pricedPositions > 0 ? toneOf(totals.unrealizedPnl) : undefined
           }
         />
         <Stat
           label="Realised P&L"
           value={formatNumber(totals?.realizedPnl)}
-          tone={(totals?.realizedPnl ?? 0) >= 0 ? "up" : "down"}
+          tone={toneOf(totals?.realizedPnl)}
         />
         <Stat
           label="Total P&L"
           value={formatNumber(totals?.totalPnl)}
-          tone={(totals?.totalPnl ?? 0) >= 0 ? "up" : "down"}
+          tone={toneOf(totals?.totalPnl)}
         />
       </div>
 

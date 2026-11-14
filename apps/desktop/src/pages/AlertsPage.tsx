@@ -329,7 +329,11 @@ export function AlertsPage({
                   </Badge>
                   <div>
                     <strong>{item.title}</strong>
-                    {item.detail && <div className="muted small" style={{ marginTop: 3 }}>{item.detail}</div>}
+                    {item.detail && (
+                      <div className="muted small brief-detail" title={item.detail} style={{ marginTop: 3 }}>
+                        {item.detail}
+                      </div>
+                    )}
                     {item.symbols && item.symbols.length > 0 && (
                       <div className="row" style={{ marginTop: 6, gap: 6 }}>
                         {item.symbols.slice(0, 16).map((symbol) => (

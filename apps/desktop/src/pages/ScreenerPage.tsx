@@ -210,6 +210,26 @@ const PRESETS: Array<{ value: Preset; label: string; rule: string; test: (row: S
   },
 ];
 
+/** The screens used most days stay one click away; the rest live in a menu. */
+const QUICK_PRESETS: Preset[] = [
+  "all",
+  "rsi30",
+  "rsi50",
+  "macd-cross",
+  "volume-breakout",
+  "uptrend",
+  "near-high",
+  "trending-1w",
+];
+
+const PRESET_GROUPS: Array<{ label: string; values: Preset[] }> = [
+  { label: "Trend", values: ["uptrend", "downtrend", "sideways", "golden", "strong-trend", "supertrend"] },
+  { label: "Momentum", values: ["rsi30", "rsi50", "oversold", "overbought", "macd-cross", "macd-bull", "ema-cross"] },
+  { label: "Volume & breakouts", values: ["volume-breakout", "volume-spike", "volume-3d"] },
+  { label: "Movers & volatility", values: ["trending-1w", "trending-2w", "volatile-2", "volatile-3", "low-vol"] },
+  { label: "Price levels & patterns", values: ["near-high", "near-low", "bull-candle"] },
+];
+
 type CapClass = "Large" | "High" | "Mid" | "Low";
 
 type SortKey =
@@ -418,19 +438,42 @@ export function ScreenerPage({
           </div>
         }
       >
-        <div className="presets" role="group" aria-label="Presets">
-          {PRESETS.map((item) => (
-            <button
-              key={item.value}
-              type="button"
-              className="toggle-chip"
-              aria-pressed={preset === item.value}
-              title={item.rule}
-              onClick={() => setPreset(item.value)}
-            >
-              {item.label}
-            </button>
-          ))}
+        <div className="presets" role="group" aria-label="Quick screens">
+          {QUICK_PRESETS.map((value) => {
+            const item = PRESETS.find((entry) => entry.value === value)!;
+            return (
+              <button
+                key={item.value}
+                type="button"
+                className="toggle-chip"
+                aria-pressed={preset === item.value}
+                title={item.rule}
+                onClick={() => setPreset(item.value)}
+              >
+                {item.label}
+              </button>
+            );
+          })}
+          <select
+            className="preset-more"
+            aria-label="More screens"
+            value={QUICK_PRESETS.includes(preset) ? "" : preset}
+            onChange={(event) => event.target.value && setPreset(event.target.value as Preset)}
+          >
+            <option value="">More screens…</option>
+            {PRESET_GROUPS.map((group) => (
+              <optgroup key={group.label} label={group.label}>
+                {group.values.map((value) => {
+                  const item = PRESETS.find((entry) => entry.value === value)!;
+                  return (
+                    <option key={value} value={value}>
+                      {item.label} — {item.rule}
+                    </option>
+                  );
+                })}
+              </optgroup>
+            ))}
+          </select>
         </div>
         <div className="filters">
           <label className="grow">

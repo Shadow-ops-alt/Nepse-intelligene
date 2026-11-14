@@ -2332,3 +2332,118 @@ label.checkbox {
   border: 2px solid transparent;
   background-clip: content-box;
 }
+
+/* ------------------------------------------------------------------ daily-use polish */
+
+.nav-item {
+  padding: 7px 10px;
+}
+
+.nav-section {
+  padding: 10px 10px 3px;
+}
+
+.footer-compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.stat-label-text {
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.stat-label .badge {
+  flex: none;
+}
+
+.stat {
+  padding: 12px 13px;
+}
+
+.stat-value {
+  font-size: 20px;
+}
+
+details.card-footer {
+  padding-top: 8px;
+}
+
+details.card-footer > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--text-subtle);
+  font-size: 11.5px;
+  font-weight: 600;
+  user-select: none;
+}
+
+details.card-footer > summary::-webkit-details-marker {
+  display: none;
+}
+
+details.card-footer > summary::before {
+  content: "i";
+  display: inline-grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid var(--border-strong);
+  font-size: 10px;
+  font-style: italic;
+  font-family: Georgia, serif;
+}
+
+details.card-footer > summary:hover {
+  color: var(--text-muted);
+}
+
+details.card-footer[open] > summary {
+  margin-bottom: 6px;
+}
+
+.card-footer-body {
+  line-height: 1.55;
+}
+
+.preset-more {
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  max-width: 220px;
+}
+
+.brief-detail {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.section-tabs .tabs {
+  margin-bottom: 0;
+}
+
+.tab {
+  padding: 8px 10px;
+}
+
+.grid.main-side {
+  grid-template-columns: minmax(0, 2fr) minmax(370px, 1fr);
+}
+
+@media (max-width: 1180px) {
+  .grid.main-side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

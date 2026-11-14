@@ -363,7 +363,7 @@ export function App() {
           type="button"
           className={`nav-item ${active ? "nav-active" : ""}`}
           aria-current={active ? "page" : undefined}
-          title={collapsed ? item.label : undefined}
+          title={item.key ? `${item.label} (Alt ${item.key})` : item.label}
           onClick={() => navigate(item.path)}
         >
           <ItemIcon />
@@ -371,10 +371,6 @@ export function App() {
           {item.path === "/alerts" && alerts.unread > 0 ? (
             <span className="nav-count" aria-label={`${alerts.unread} unread alerts`}>
               {alerts.unread > 99 ? "99+" : alerts.unread}
-            </span>
-          ) : item.key ? (
-            <span className="nav-key" aria-hidden="true">
-              Alt {item.key}
             </span>
           ) : null}
         </button>
@@ -409,23 +405,14 @@ export function App() {
 
         <div className="sidebar-footer">
           {meta ? (
-            <div className="footer-detail stack-sm">
+            <div className="footer-detail footer-compact" title={`${meta.store.companies.toLocaleString()} securities · ${meta.store.candles.toLocaleString()} candles`}>
               <DataStateBadge
                 state={meta.dataState.state}
                 classification={meta.dataState.classification}
               />
-              <div className="footer-line">
-                <span>Companies</span>
-                <strong className="num">{meta.store.companies.toLocaleString()}</strong>
-              </div>
-              <div className="footer-line">
-                <span>Candles</span>
-                <strong className="num">{meta.store.candles.toLocaleString()}</strong>
-              </div>
-              <div className="footer-line">
-                <span>Last session</span>
-                <strong className="num">{lastSession ?? "—"}</strong>
-              </div>
+              <span className="muted small">
+                Last session <strong className="num">{lastSession ?? "—"}</strong>
+              </span>
             </div>
           ) : (
             <span className="muted small footer-detail">Connecting to local store…</span>
