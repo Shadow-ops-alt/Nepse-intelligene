@@ -67,6 +67,8 @@ export interface CompanyDetailProps {
   fundamentals: ApiState<FundamentalsResponse>;
   actions: ApiState<CorporateActionsResponse>;
   news: ApiState<NewsResponse>;
+  /** Import provenance of this company's master row. */
+  companyProvenance?: Provenance | null;
 }
 
 function statusOf(error: string | null): number | null {
@@ -142,7 +144,14 @@ export const CompanyDetail = memo(function CompanyDetail(props: CompanyDetailPro
         ]}
       />
       {tab === "profile" && (
-        <ProfilePanel company={company} symbol={symbol} cap={cap} capClass={capClass.value} capUniverse={capClass.size} />
+        <ProfilePanel
+          company={company}
+          symbol={symbol}
+          cap={cap}
+          capClass={capClass.value}
+          capUniverse={capClass.size}
+          provenance={props.companyProvenance ?? null}
+        />
       )}
       {tab === "fundamentals" && (
         <FundamentalsPanel symbol={symbol} state={fundamentals} merged={merged} close={close} company={company} cap={cap} />
@@ -178,12 +187,14 @@ function ProfilePanel({
   cap,
   capClass,
   capUniverse,
+  provenance,
 }: {
   company: Company | undefined;
   symbol: string;
   cap: Val;
   capClass: CapClass | null;
   capUniverse: number;
+  provenance: Provenance | null;
 }) {
   if (!company) {
     return (
@@ -284,9 +295,9 @@ function ProfilePanel({
       <div className="card-footer" style={{ marginTop: 0 }}>
         <div className="stack-sm">
           <ProvenanceLine
+            provenance={provenance}
             sources={company.profileSource ? [company.profileSource] : ["company master"]}
             asOf={company.profileAsOf ?? null}
-            dataState={{ state: "eod", stale: false, total: 1, counts: { live: 0, delayed: 0, eod: 1, stale: 0, unavailable: 0 }, lastAsOf: company.profileAsOf ?? null }}
           />
           <span className="small">
             Market cap: {cap.note}. {CAP_RULE} ({capUniverse} equities ranked; peers use the
@@ -497,6 +508,8 @@ function FundamentalsPanel({
           <span className="small">
             UNVERIFIED values as displayed by Merolagani (key ratios) and ShareSansar
             (latest quarterly statement, unaudited). <strong>d</strong> = DERIVED locally.
+            Merolagani’s EPS is the latest reported quarter as displayed (part-year for
+            Q1–Q3), and its P/E uses that figure; the statement EPS is annualised.
             {missing.length > 0 && ` Not published for ${symbol}: ${missing.join(", ")}.`} Audited
             multi-year statements, cash-flow statements and full historical balance sheets are
             not published by the free pages; only the periods listed above are stored.

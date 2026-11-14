@@ -169,6 +169,7 @@ export function CompanyPage({
       fundamentals={fundamentalsState}
       actions={actionsState}
       news={newsState}
+      companyProvenance={companiesState.data?.provenance[symbol] ?? null}
     />
   );
 

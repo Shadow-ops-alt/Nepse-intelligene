@@ -208,7 +208,11 @@ export function ComparePanel({ universe }: { universe: DeskUniverse }) {
               disabled={selected.length >= MAX}
               onChange={(event) => {
                 const value = event.target.value;
-                if (!tryAdd(value)) setDraft(value);
+                // Picking from the list fires a change without a typing inputType;
+                // typed text only adds on Enter, so "NIC" never jumps to a match early.
+                const inputType = (event.nativeEvent as InputEvent).inputType;
+                const picked = !inputType || inputType === "insertReplacementText";
+                if (!(picked && tryAdd(value))) setDraft(value);
               }}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {

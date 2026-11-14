@@ -428,6 +428,12 @@ function UnavailableFooter({ items, total, statements }: { items: CoverageItem[]
         computed. {CAP_RULE}
       </span>
       <span>
+        <strong>EPS basis:</strong> Merolagani shows EPS for the latest reported quarter
+        as displayed (the Period column shows Q1–Q3 when it is a part-year figure), and its
+        P/E is built on that figure, so part-year P/Es read high. The ShareSansar statement
+        EPS (annualised) is used only when Merolagani has none.
+      </span>
+      <span>
         <strong>Published coverage</strong> (of {total}):{" "}
         {items.map((item) => `${item.label} ${item.published}${item.derived ? ` (+${item.derived} d)` : ""}`).join(" · ")}.
       </span>
