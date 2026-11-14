@@ -199,6 +199,15 @@ show unavailable rather than invented values.
   a manifest containing the URL, commit, retrieval time, licence, attribution,
   and hashes of the symbol master and index file.
 
+### 6a. Live market (unofficial, operator-enabled by default)
+
+| Source | Datasets | Verified behaviour (2026-11-14) |
+|---|---|---|
+| nepalstock.com internal endpoints via the `nepseman-api` token method | Live LTP per scrip, market open/close, market summary, NEPSE index, market depth | `/api/authenticate/prove` answered from the build environment (one transient connection reset); the live market returned the last session's 335 rows while closed, and 334/334 LTPs equalled the archive's 2026-11-13 closes. Depth not yet observed during a session. |
+
+Live values are not stored as history and are labelled unofficial. NEPSE may
+block networks or change the token scheme at any time.
+
 ### 7. Attribution
 
 - `binayabaral/nepal-market-data` (MIT), the compiled public archive.
@@ -207,6 +216,8 @@ show unavailable rather than invented values.
   news publisher.
 - `sebon.gov.np`, the securities regulator, used only as an IPO/rights
   reference.
+- `nepseman-api` (MIT, dipalkatuwal), whose token-decoding method and bundled
+  `nepse.wasm` the live service uses.
 - `Aabishkar2/nepse-data`, the historical OHLC source credited upstream.
 
 Do not redistribute the raw data or a database containing it. The Free Edition

@@ -10,6 +10,19 @@ is a historical record.
 
 ## 1. Data decision (please read first)
 
+> **Update 2026-11-14 — live data decision changed.** The product owner chose
+> to add **unofficial live LTP** from nepalstock.com's internal web endpoints,
+> using the token method of the MIT-licensed `nepseman-api` package, **on by
+> default** in the Free Edition (`NEPSE_LIVE=0` turns it off). This reverses
+> the earlier "no live feed / no reverse-engineered access" policy for the
+> Free Edition only and was made after the legal/terms risk was explained:
+> NEPSE has not granted permission, and the method decodes NEPSE's obfuscated
+> session token with NEPSE's own WASM. Safeguards: TLS verification stays on
+> (the package's own session module disables it process-wide, so it is not
+> used), requests are cached/throttled with backoff, live values are labelled
+> `LIVE · unofficial`, and they are never written into the end-of-day history.
+> See `packages/api/src/live/` and docs/CLIENT_FEATURES.md.
+
 **We are not going to use official live data from NEPSE or from an MDA
 (market-data) feed.** No licensed vendor, no live or intraday endpoint, and no
 unofficial NEPSE API wrapper ship in this product.

@@ -200,6 +200,21 @@ The store applies schema migrations on open and exposes the schema version.
 Demo or mock rows are rejected at the `PersonalStore` boundary, so they can
 never enter the product database.
 
+## Live market (unofficial, on by default)
+
+Since 2026-11-14 the Free Edition shows unofficial live LTP, market summary,
+NEPSE index and market depth from nepalstock.com's internal endpoints, using
+the token method of the MIT-licensed `nepseman-api` package. This is a product
+owner decision; NEPSE has not authorised it and may block it. The service:
+
+- polls only while a client asks: every 10 s while the market is open, at most
+  every 5 minutes otherwise, with single-flight requests and backoff;
+- keeps TLS verification on and ships `nepse.wasm` next to the Electron server;
+- labels every value `LIVE · unofficial` and never writes it to the
+  end-of-day store, so charts, signals and history stay archive-based;
+- is disabled with `NEPSE_LIVE=0`; the licensed edition enables it only when
+  unofficial data is explicitly allowed.
+
 ## What it deliberately cannot do
 
 These are gated by capability, not hidden behind empty arrays:
@@ -212,7 +227,7 @@ These are gated by capability, not hidden behind empty arrays:
 - A guaranteed delisted/suspended history. The public archive happens to carry
   21 merged symbols, which are imported and marked `delisted`, but there is no
   complete delisting record; backtests can still be survivorship-biased.
-- Historical intraday or live prices.
+- Historical intraday prices (live prices are available unofficially, see above).
 - Mutual-fund portfolio holdings (published as PDFs only).
 - Redistribution rights for the scraped public pages.
 

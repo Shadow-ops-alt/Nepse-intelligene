@@ -85,9 +85,12 @@ distribution), quant screener, watchlist with correlation matrix, portfolio
 ledger/P&L with allocation, company browser, data/coverage, and settings.
 `Ctrl K` opens the command palette. Light, dark and Auto themes are included.
 
-**Data policy:** no official or live NEPSE/market-data feed is used. Prices are
-unofficial end-of-day closes; every other number is mathematics on those
-closes, labelled *derived*. See [docs/HANDOFF.md](docs/HANDOFF.md).
+**Data policy:** prices come from unofficial public sources — an end-of-day
+archive plus public ShareSansar/Merolagani pages — and, since 2026-11-14, an
+unofficial live LTP view from nepalstock.com (on by default, `NEPSE_LIVE=0`
+disables it). Indicators, signals and screens are mathematics on the stored
+end-of-day data, labelled *derived*. See [docs/HANDOFF.md](docs/HANDOFF.md)
+and the feature checklist in [docs/CLIENT_FEATURES.md](docs/CLIENT_FEATURES.md).
 
 Personal/free-source utilities:
 
