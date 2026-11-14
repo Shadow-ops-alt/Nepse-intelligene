@@ -13,7 +13,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "electron:server": "esbuild electron/server.ts --bundle --platform=node --format=esm --outfile=electron/server.mjs --external:electron",
+    "electron:server": "esbuild electron/server.ts --bundle --platform=node --format=esm --outfile=electron/server.mjs --external:electron --banner:js=\"import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);\"",
     "electron:start": "install-electron && pnpm build && pnpm electron:server && electron .",
     "electron:dev": "NEPSE_DEV_URL=http://127.0.0.1:5173 electron .",
     "electron:package": "pnpm build && pnpm electron:server && electron-builder"
