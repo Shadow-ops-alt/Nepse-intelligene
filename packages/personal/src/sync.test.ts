@@ -171,4 +171,39 @@ describe("syncPersonalData", () => {
       store.close();
     }
   });
+  it("imports every listed index, not only NEPSE", async () => {
+    const directory = fixture();
+    mkdirSync(join(directory, "indices"), { recursive: true });
+    writeFileSync(
+      join(directory, "indices.csv"),
+      ["symbol,name,isSector", "NEPSE,NEPSE Index,false", "BANKING,Banking SubIndex,true", ""].join("\n"),
+      "utf8",
+    );
+    for (const [symbol, close] of [["NEPSE", 2650], ["BANKING", 1400]] as const) {
+      writeFileSync(
+        join(directory, "indices", `${symbol}.csv`),
+        [
+          "symbol,date,open,high,low,close,volume",
+          `${symbol},2026-11-02,${close},${close + 5},${close - 5},${close},0`,
+          `${symbol},2026-11-03,${close},${close + 6},${close - 4},${close + 2},0`,
+          "",
+        ].join("\n"),
+        "utf8",
+      );
+    }
+    const store = new PersonalStore(":memory:");
+    try {
+      await syncPersonalData({
+        provider: createPersonalFreeProvider({ dataDir: directory }),
+        policy: { ...DEVELOPMENT_POLICY, allowUnofficial: true },
+        store,
+        from: "2026-11-01",
+        to: "2026-11-03",
+      });
+      const stored = store.getSymbolsWithCandles("free-source", "index");
+      expect(stored).toEqual(expect.arrayContaining(["NEPSE", "BANKING"]));
+    } finally {
+      store.close();
+    }
+  });
 });

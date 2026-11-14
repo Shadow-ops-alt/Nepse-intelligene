@@ -215,7 +215,7 @@ export async function syncPersonalData(
       symbol: string;
       envelope: DataEnvelope<Candle[]>;
     }> = [];
-    let indexCandles: DataEnvelope<Candle[]> | null = null;
+    const indexCandles: Array<DataEnvelope<Candle[]>> = [];
 
     try {
       const envelope = await service.getCompanyList();
@@ -256,19 +256,34 @@ export async function syncPersonalData(
       }
     }
 
+    // The main index first, then every other listed index (sector
+    // sub-indices) unless the caller asked for one specific index. A missing
+    // sub-index file is skipped quietly; only the main index warns.
     const indexSymbol = (options.indexSymbol ?? "NEPSE").toUpperCase();
-    try {
-      const envelope = await service.getIndexHistory(indexSymbol, {
-        from: options.from,
-        to: options.to,
-      });
-      indexCandles = envelope;
-      candleRows += envelope.data.length;
-      recordGaps(indexSymbol, envelope.data);
-      options.onProgress?.(`index ${indexSymbol}: ${envelope.data.length} candles`);
-    } catch (error) {
-      rethrowIfFatal(error);
-      warnings.push(`index history ${indexSymbol} unavailable: ${message(error)}`);
+    const indexSymbols = [indexSymbol];
+    if (!options.indexSymbol && indexEnvelope) {
+      for (const index of indexEnvelope.data) {
+        const symbol = index.symbol.toUpperCase();
+        if (!indexSymbols.includes(symbol)) indexSymbols.push(symbol);
+      }
+    }
+    for (const symbol of indexSymbols) {
+      try {
+        const envelope = await service.getIndexHistory(symbol, {
+          from: options.from,
+          to: options.to,
+        });
+        if (envelope.data.length === 0) continue;
+        indexCandles.push(envelope);
+        candleRows += envelope.data.length;
+        if (symbol === indexSymbol) recordGaps(symbol, envelope.data);
+        options.onProgress?.(`index ${symbol}: ${envelope.data.length} candles`);
+      } catch (error) {
+        rethrowIfFatal(error);
+        if (symbol === indexSymbol) {
+          warnings.push(`index history ${symbol} unavailable: ${message(error)}`);
+        }
+      }
     }
 
     try {
@@ -384,8 +399,8 @@ export async function syncPersonalData(
         for (const entry of equityEnvelopes) {
           store.upsertCandles(entry.envelope, "equity");
         }
-        if (indexCandles) {
-          store.upsertCandles(indexCandles, "index");
+        for (const envelope of indexCandles) {
+          store.upsertCandles(envelope, "index");
         }
         if (quotesEnvelope) {
           store.upsertQuotes(quotesEnvelope);
