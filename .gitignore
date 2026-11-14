@@ -6,6 +6,7 @@ coverage/
 reports/
 *.log
 apps/desktop/electron/server.mjs
+apps/desktop/electron/nepse.wasm
 .env
 .env.*
 !.env.example

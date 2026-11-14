@@ -30,6 +30,7 @@ import {
   type TradeInput,
 } from "@stock/analytics";
 import { syncPersonalData } from "@stock/personal";
+import { createLiveService, liveEnabledFromEnv } from "./live";
 import { parseCsvRecords } from "./csv";
 
 export interface ApiConfig {
@@ -519,6 +520,15 @@ export function createApiServer(config: ApiConfig): ApiHandle {
 
   const providerId = provider?.descriptor.id ?? PERSONAL_PROVIDER_ID;
   const allCapabilities = CapabilitySchema.options as Capability[];
+  // Unofficial live LTP (nepalstock.com via the nepseman-api token method).
+  // On by default in the Free Edition; NEPSE_LIVE=0 turns it off. The strict
+  // licensed edition only enables it when unofficial data is explicitly allowed.
+  const live = createLiveService({
+    env,
+    enabled:
+      liveEnabledFromEnv(env) &&
+      ((policy.edition ?? "licensed") === "free" || policy.allowUnofficial),
+  });
   let syncInFlight = false;
   const readCompanyEvents = createCompanyEventsReader(config.dataDir);
   const sourceClassification = () =>
@@ -671,6 +681,10 @@ export function createApiServer(config: ApiConfig): ApiHandle {
       }
 
       try {
+        if (request.method === "GET" && (await live.handle(url, response))) {
+          return;
+        }
+
         if (request.method === "GET" && url.pathname === "/api/health") {
           sendJson(response, 200, {
             ok: true,

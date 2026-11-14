@@ -18,7 +18,8 @@
     "@stock/core": "workspace:*",
     "@stock/providers": "workspace:*",
     "@stock/store": "workspace:*",
-    "@stock/personal": "workspace:*"
+    "@stock/personal": "workspace:*",
+    "nepseman-api": "1.0.0"
   },
   "devDependencies": {
     "vitest": "^5.1.0"
