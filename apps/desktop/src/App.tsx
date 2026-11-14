@@ -34,6 +34,9 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { LivePage } from "./pages/LivePage";
 import { CalculatorPage } from "./pages/CalculatorPage";
+import { SectorsPage } from "./pages/SectorsPage";
+import { FloorsheetPage } from "./pages/FloorsheetPage";
+import { EventsPage } from "./pages/EventsPage";
 import { useAlerts } from "./alerts";
 
 function useHashRoute(): string {
@@ -97,6 +100,30 @@ const RESEARCH: NavItem[] = [
     crumb: "Technical, volume and risk screens computed from stored candles",
     icon: Icon.Screener,
     key: "4",
+  },
+  {
+    path: "/sectors",
+    label: "Sectors",
+    title: "Sectors",
+    crumb: "Sector members, 1-week volume, trending and volatile stocks",
+    icon: Icon.Companies,
+    key: "6",
+  },
+  {
+    path: "/floorsheet",
+    label: "Floorsheet & brokers",
+    title: "Floorsheet & brokers",
+    crumb: "Top stocks, broker buy/sell, bulk trades and multi-day accumulation",
+    icon: Icon.Data,
+    key: "7",
+  },
+  {
+    path: "/events",
+    label: "IPO, events & news",
+    title: "IPO, events & news",
+    crumb: "IPO/FPO/right pipeline, dividends, mergers, lock-in and news",
+    icon: Icon.Clock,
+    key: "8",
   },
   {
     path: "/companies",
@@ -296,6 +323,12 @@ export function App() {
     content = <AlertsPage alerts={alerts} onOpenSymbol={openSymbol} />;
   } else if (page === "live") {
     content = <LivePage onOpenSymbol={openSymbol} />;
+  } else if (page === "sectors") {
+    content = <SectorsPage onOpenSymbol={openSymbol} />;
+  } else if (page === "floorsheet") {
+    content = <FloorsheetPage onOpenSymbol={openSymbol} />;
+  } else if (page === "events") {
+    content = <EventsPage onOpenSymbol={openSymbol} />;
   } else if (page === "calculator") {
     content = <CalculatorPage />;
   } else if (page === "settings") {
