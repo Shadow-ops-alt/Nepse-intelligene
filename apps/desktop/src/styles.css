@@ -2090,6 +2090,35 @@ label.checkbox {
   line-height: 1.7;
 }
 
+.news-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.news-list li {
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+  line-height: 1.5;
+}
+
+.news-list li:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.news-list a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.news-list a:hover {
+  text-decoration: underline;
+}
+
 .code-block {
   margin: 10px 0;
   padding: 12px 14px;

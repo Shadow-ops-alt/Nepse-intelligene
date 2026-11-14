@@ -326,6 +326,183 @@ describe("api server", () => {
     }
   });
 
+  it("serves stored public-web datasets with provenance", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "stock-api-web-"));
+    directories.push(directory);
+    const dbPath = join(directory, "personal.db");
+    const dataDir = join(directory, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const store = new PersonalStore(dbPath);
+    store.upsertSnapshot("news", "latest", envelope([
+      {
+        id: "1",
+        title: "Headline",
+        url: "https://example.com/news/1",
+        publishedAt: "2026-11-13T12:00:00+05:45",
+        source: "sharesansar",
+        symbols: [],
+      },
+    ]));
+    store.upsertSnapshot("ipos", "all", envelope([
+      {
+        id: "1",
+        companyName: "Tenx Hydro",
+        symbol: "TENX",
+        type: "ipo",
+        units: 800000,
+        status: "closed",
+      },
+    ]));
+    store.upsertSnapshot("fundamentals", "NABIL", envelope({
+      symbol: "NABIL",
+      asOf: "2026-11-14T00:00:00.000Z",
+      period: "FY083-084",
+      metrics: {
+        eps: {
+          metric: "eps",
+          value: 33.89,
+          unit: "currency",
+          currency: "NPR",
+          confidence: "unverified",
+        },
+      },
+    }));
+    store.upsertSnapshot("fundamentalsHistory", "NABIL", envelope([]));
+    store.upsertSnapshot("fundamentals", "NGF", envelope({
+      symbol: "NGF",
+      asOf: "2026-11-14T00:00:00.000Z",
+      period: "2026-11-13",
+      metrics: {
+        nav: {
+          metric: "nav",
+          value: 9.94,
+          unit: "currency",
+          currency: "NPR",
+          confidence: "unverified",
+        },
+      },
+    }));
+    store.upsertSnapshot("corporateActions", "NABIL", envelope([
+      {
+        symbol: "NABIL",
+        type: "cashDividend",
+        ratio: "10.8%",
+        value: 10.8,
+        currency: "NPR",
+      },
+    ]));
+    store.upsertSnapshot("floorsheet", "2026-11-13", envelope([
+      {
+        contractId: "2026111305011775",
+        businessDate: "2026-11-13",
+        symbol: "AHL",
+        buyerBroker: "62",
+        sellerBroker: "40",
+        quantity: 10,
+        rate: 400,
+        amount: 4000,
+      },
+    ]));
+    store.upsertSnapshot("brokerFlows", "2026-11-13", envelope([
+      {
+        brokerId: "62",
+        businessDate: "2026-11-13",
+        buyQuantity: 10,
+        buyAmount: 4000,
+        sellQuantity: 0,
+        sellAmount: 0,
+        netQuantity: 10,
+        netAmount: 4000,
+      },
+    ]));
+    store.close();
+
+    const { server } = createApiServer({
+      dbPath,
+      dataDir,
+      env: {
+        NODE_ENV: "production",
+        DATA_EDITION: "free",
+        PERSONAL_DATA_DIR: dataDir,
+      },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+
+    try {
+      const news = (await (await fetch(`${base}/api/news`)).json()) as {
+        news: unknown[];
+        provenance: { classification: string } | null;
+      };
+      expect(news.news).toHaveLength(1);
+      expect(news.provenance?.classification).toBe("UNVERIFIED");
+
+      const ipos = (await (await fetch(`${base}/api/ipos`)).json()) as {
+        ipos: unknown[];
+      };
+      expect(ipos.ipos).toHaveLength(1);
+
+      const fundamentals = (await (
+        await fetch(`${base}/api/fundamentals?symbol=NABIL`)
+      ).json()) as {
+        latest: { period: string; metrics: Record<string, { value: number }> };
+        history: unknown[];
+      };
+      expect(fundamentals.latest.period).toBe("FY083-084");
+      expect(fundamentals.latest.metrics.eps?.value).toBe(33.89);
+
+      const symbols = (await (
+        await fetch(`${base}/api/fundamentals`)
+      ).json()) as { symbols: string[] };
+      expect(symbols.symbols.sort()).toEqual(["NABIL", "NGF"]);
+
+      const actions = (await (
+        await fetch(`${base}/api/corporate-actions?symbol=NABIL`)
+      ).json()) as { actions: unknown[] };
+      expect(actions.actions).toHaveLength(1);
+
+      const floorsheet = (await (
+        await fetch(`${base}/api/floorsheet`)
+      ).json()) as {
+        date: string | null;
+        trades: unknown[];
+        availableDates: string[];
+      };
+      expect(floorsheet.date).toBe("2026-11-13");
+      expect(floorsheet.trades).toHaveLength(1);
+      expect(floorsheet.availableDates).toEqual(["2026-11-13"]);
+
+      const flows = (await (
+        await fetch(`${base}/api/broker-flows`)
+      ).json()) as { date: string | null; flows: unknown[] };
+      expect(flows.date).toBe("2026-11-13");
+      expect(flows.flows).toHaveLength(1);
+
+      const funds = (await (
+        await fetch(`${base}/api/mutual-funds`)
+      ).json()) as { funds: Array<{ symbol: string }> };
+      expect(funds.funds.map((fund) => fund.symbol)).toEqual(["NGF"]);
+
+      const coverage = (await (
+        await fetch(`${base}/api/coverage`)
+      ).json()) as {
+        datasets: Array<{
+          capability: string;
+          available: boolean;
+          note: string | null;
+        }>;
+      };
+      const floorsheetCoverage = coverage.datasets.find(
+        (row) => row.capability === "floorsheet",
+      );
+      expect(floorsheetCoverage?.available).toBe(true);
+      expect(floorsheetCoverage?.note).toContain("1 stored trading day");
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
   it("explains which files are missing instead of a generic provider failure", async () => {
     const directory = mkdtempSync(join(tmpdir(), "stock-api-empty-"));
     directories.push(directory);

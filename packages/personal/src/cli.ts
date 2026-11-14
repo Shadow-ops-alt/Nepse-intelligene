@@ -15,6 +15,8 @@ import { assertPersonalMode, PERSONAL_MODE_BANNER } from "./mode";
 import { syncPersonalData } from "./sync";
 import { analyzeCandles } from "./analysis";
 import { acquireNepseSource, NEPSE_SOURCE_URL } from "./acquire";
+import { acquireCompanyDetails } from "./web/company-details";
+import { acquireBulkData } from "./web/bulk";
 
 const invocationDir = process.env.INIT_CWD ?? process.cwd();
 
@@ -109,12 +111,16 @@ program
           ? { symbols: options.symbols.split(",") }
           : {}),
         indexSymbol: String(options.index ?? "NEPSE"),
+        dataDir,
         onProgress: (line) => console.log(`  ${line}`),
       });
 
       console.log("");
       console.log(
         `Synced ${result.companies} companies, ${result.equitySeries} equity series, ${result.candleRows} candles.`,
+      );
+      console.log(
+        `Snapshots: ${result.snapshots} (fundamentals ${result.fundamentals}, corporate actions ${result.corporateActions}, IPOs ${result.ipos}, news ${result.news}, floorsheet ${result.floorsheetTrades} trades, broker flows ${result.brokerFlows}).`,
       );
       if (result.failedSymbols.length > 0) {
         console.log(`Skipped symbols: ${result.failedSymbols.join(", ")}`);
@@ -192,6 +198,137 @@ program
   });
 
 program
+  .command("details")
+  .description(
+    "Fetch public company profiles, key ratios and corporate actions into canonical CSV (no database write)",
+  )
+  .option(
+    "--data-dir <path>",
+    "canonical data directory (must already contain companies.csv)",
+    process.env.PERSONAL_DATA_DIR ?? "./data/personal",
+  )
+  .option("--symbols <list>", "comma-separated symbols (default: all active equities)")
+  .option("--limit <count>", "maximum companies to fetch; 0 means all", "0")
+  .option("--max-age-minutes <minutes>", "reuse a cached page younger than this", "720")
+  .option("--force", "ignore the page cache and refetch every page")
+  .action(async (options: Record<string, string | boolean | undefined>) => {
+    const dataDir = resolve(
+      invocationDir,
+      String(options.dataDir ?? "./data/personal"),
+    );
+    console.log(PERSONAL_MODE_BANNER);
+    console.log("");
+    try {
+      const result = await acquireCompanyDetails({
+        dataDir,
+        ...(typeof options.symbols === "string" && options.symbols.length > 0
+          ? { symbols: options.symbols.split(",") }
+          : {}),
+        limit: Number(options.limit ?? 0),
+        force: options.force === true,
+        maxAgeMinutes: Number(options.maxAgeMinutes ?? 720),
+        onProgress: (line) => console.log(`  ${line}`),
+      });
+      console.log("");
+      console.log(
+        `Profiles: ${result.companiesWithProfile}/${result.requested} companies; fundamentals files: ${result.fundamentalsFiles}; new corporate-action rows: ${result.corporateActionRows}.`,
+      );
+      console.log(`Companies:        ${result.companyFile}`);
+      console.log(`Corporate actions: ${result.corporateActionsFile}`);
+      console.log(`Report:           ${result.reportPath}`);
+      if (result.conflicts.length > 0) {
+        console.log(`Conflicts reported: ${result.conflicts.length}`);
+        for (const conflict of result.conflicts.slice(0, 10)) {
+          console.log(
+            `  ${conflict.symbol} ${conflict.field}: kept ${conflict.kept} (alternative ${conflict.alternative})`,
+          );
+        }
+      }
+      if (result.failures.length > 0) {
+        console.log(`Failures: ${result.failures.length}`);
+        for (const failure of result.failures.slice(0, 10)) {
+          console.log(`  ${failure.symbol} ${failure.source}: ${failure.error}`);
+        }
+      }
+      if (result.skipped.length > 0) {
+        console.log(`Skipped: ${result.skipped.length}`);
+        for (const entry of result.skipped.slice(0, 10)) {
+          console.log(`  ${entry}`);
+        }
+      }
+    } catch (error) {
+      console.error(`Details acquisition failed: ${describeError(error)}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
+  .command("bulk")
+  .description(
+    "Fetch public market summary, sub-index history, prices, floorsheet, news, IPOs and mutual-fund NAVs into canonical CSV (no database write)",
+  )
+  .option(
+    "--data-dir <path>",
+    "canonical data directory",
+    process.env.PERSONAL_DATA_DIR ?? "./data/personal",
+  )
+  .option("--from <date>", "history start date (YYYY-MM-DD); default: five years ago")
+  .option("--to <date>", "history end date (YYYY-MM-DD); default: today", isoDate(new Date()))
+  .option("--max-age-minutes <minutes>", "reuse a cached page younger than this", "720")
+  .option("--force", "ignore the page cache and refetch every page")
+  .action(async (options: Record<string, string | boolean | undefined>) => {
+    const dataDir = resolve(
+      invocationDir,
+      String(options.dataDir ?? "./data/personal"),
+    );
+    console.log(PERSONAL_MODE_BANNER);
+    console.log("");
+    try {
+      const result = await acquireBulkData({
+        dataDir,
+        ...(typeof options.from === "string" && options.from.length > 0
+          ? { from: options.from }
+          : {}),
+        to: String(options.to ?? isoDate(new Date())),
+        force: options.force === true,
+        maxAgeMinutes: Number(options.maxAgeMinutes ?? 720),
+        onProgress: (line) => console.log(`  ${line}`),
+      });
+      console.log("");
+      console.log(
+        `Indices: ${result.indices.files} files, ${result.indices.added} new rows; sectors: ${result.sectorRows}; market summary: ${result.marketSummary ? "available" : "unavailable"}.`,
+      );
+      console.log(
+        `Prices: ${result.prices.quotes} quotes, ${result.prices.candleAdds} new candles; floorsheet: ${result.floorsheet.trades} trades (${result.floorsheet.date ?? "no date"}).`,
+      );
+      console.log(
+        `News: ${result.news.total}; IPOs: ${result.ipos.total}; mutual-fund NAV rows: ${result.mutualFunds}.`,
+      );
+      console.log(`Report: ${result.reportPath}`);
+      if (result.conflicts.length > 0) {
+        console.log(`Conflicts reported: ${result.conflicts.length}`);
+        for (const conflict of result.conflicts.slice(0, 10)) {
+          console.log(
+            `  ${conflict.dataset} ${conflict.key} ${conflict.field}: kept ${conflict.kept} (alternative ${conflict.alternative})`,
+          );
+        }
+      }
+      if (result.failureCount > 0) {
+        console.log(`Failures: ${result.failureCount}`);
+        for (const failure of result.failures.slice(0, 10)) {
+          console.log(`  ${failure.dataset} ${failure.source}: ${failure.error}`);
+        }
+      }
+      for (const entry of result.skipped.slice(0, 10)) {
+        console.log(`Skipped: ${entry}`);
+      }
+    } catch (error) {
+      console.error(`Bulk acquisition failed: ${describeError(error)}`);
+      process.exitCode = 1;
+    }
+  });
+
+program
   .command("update")
   .description(
     "Fetch the public NEPSE archive, normalize it, and import it into the local store",
@@ -217,6 +354,7 @@ program
   .option("--symbols <list>", "comma-separated symbols (default: all companies)")
   .option("--index <symbol>", "index symbol", "NEPSE")
   .option("--skip-sync", "fetch and normalize only; do not write the database")
+  .option("--skip-bulk", "skip the public web datasets (summary, indices, floorsheet, news, IPOs, NAVs)")
   .action(async (options: Record<string, string | boolean | undefined>) => {
     try {
       assertPersonalMode(process.env);
@@ -252,6 +390,30 @@ program
       for (const warning of acquired.warnings) {
         console.log(`Warning: ${warning}`);
       }
+      if (options.skipBulk !== true) {
+        console.log("");
+        console.log("Public web datasets:");
+        try {
+          const bulk = await acquireBulkData({
+            dataDir,
+            from: String(options.from ?? "1990-01-01"),
+            to: String(options.to ?? isoDate(new Date())),
+            force: options.force === true,
+            onProgress: (line) => console.log(`  ${line}`),
+          });
+          console.log(
+            `  indices: ${bulk.indices.files} files (${bulk.indices.added} new rows); market summary: ${bulk.marketSummary ? "available" : "unavailable"}; sectors: ${bulk.sectorRows}; floorsheet: ${bulk.floorsheet.trades} trades; news: ${bulk.news.total}; IPOs: ${bulk.ipos.total}; fund NAVs: ${bulk.mutualFunds}.`,
+          );
+          if (bulk.failureCount > 0) {
+            console.log(`  Web source failures: ${bulk.failureCount} (see reports/bulk.json)`);
+          }
+          for (const warning of bulk.skipped.slice(0, 5)) {
+            console.log(`  Note: ${warning}`);
+          }
+        } catch (error) {
+          console.log(`  Bulk acquisition failed (continuing with the archive): ${describeError(error)}`);
+        }
+      }
       if (options.skipSync === true) {
         console.log(`Normalized data: ${acquired.dataDir}`);
         return;
@@ -280,11 +442,15 @@ program
             : {}),
           indexSymbol: String(options.index ?? "NEPSE"),
           files: acquired.files,
+          dataDir,
           onProgress: (line) => console.log(`  ${line}`),
         });
         console.log("");
         console.log(
           `Imported ${result.companies} companies, ${result.equitySeries} equity series, ${result.candleRows} candles, ${result.quotes} quotes.`,
+        );
+        console.log(
+          `Snapshots: ${result.snapshots} (fundamentals ${result.fundamentals}, corporate actions ${result.corporateActions}, IPOs ${result.ipos}, news ${result.news}, floorsheet ${result.floorsheetTrades} trades, broker flows ${result.brokerFlows}).`,
         );
         if (result.failedSymbols.length > 0) {
           console.log(`Skipped symbols: ${result.failedSymbols.join(", ")}`);

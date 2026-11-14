@@ -751,6 +751,29 @@ export class PersonalStore {
     )?.data;
   }
 
+  /** Number of stored rows for a capability (e.g. floorsheet days). */
+  countSnapshots(providerId: string, capability: string): number {
+    const row = this.db
+      .prepare(
+        `SELECT COUNT(*) AS n FROM snapshots
+         WHERE provider_id = ? AND capability = ?`,
+      )
+      .get(providerId, capability);
+    return Number(row?.n ?? 0);
+  }
+
+  /** Natural keys for a capability, newest first where a date is the key. */
+  listSnapshotKeys(providerId: string, capability: string): string[] {
+    return this.db
+      .prepare(
+        `SELECT natural_key FROM snapshots
+         WHERE provider_id = ? AND capability = ?
+         ORDER BY natural_key DESC`,
+      )
+      .all(providerId, capability)
+      .map((row) => String(row.natural_key));
+  }
+
   getSnapshotWithProvenance<T>(
     providerId: string,
     capability: string,

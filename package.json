@@ -21,6 +21,8 @@
     "phase0:validate": "pnpm --filter @stock/validation exec tsx src/cli.ts validate",
     "personal:sync": "pnpm --filter @stock/personal exec tsx src/cli.ts sync",
     "personal:acquire": "pnpm --filter @stock/personal exec tsx src/cli.ts acquire",
+    "personal:details": "pnpm --filter @stock/personal exec tsx src/cli.ts details",
+    "personal:bulk": "pnpm --filter @stock/personal exec tsx src/cli.ts bulk",
     "personal:update": "pnpm --filter @stock/personal exec tsx src/cli.ts update",
     "personal:status": "pnpm --filter @stock/personal exec tsx src/cli.ts status",
     "personal:backup": "pnpm --filter @stock/personal exec tsx src/cli.ts backup",

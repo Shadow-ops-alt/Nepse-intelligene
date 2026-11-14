@@ -237,6 +237,21 @@ export class CsvProvider extends BaseProvider {
         ? { listedAt: normalizeTradingDate(row.listedAt) }
         : {}),
       ...(row.marketCap ? { marketCap: toNumber(row.marketCap) } : {}),
+      ...(row.sharesOutstanding
+        ? { sharesOutstanding: toNumber(row.sharesOutstanding) }
+        : {}),
+      ...(row.paidUpValue ? { paidUpValue: toNumber(row.paidUpValue) } : {}),
+      ...(row.totalPaidUpValue
+        ? { totalPaidUpValue: toNumber(row.totalPaidUpValue) }
+        : {}),
+      ...(row.operationDate
+        ? { operationDate: normalizeTradingDate(row.operationDate) }
+        : {}),
+      ...(row.registrar ? { registrar: row.registrar } : {}),
+      ...(row.address ? { address: row.address } : {}),
+      ...(row.phone ? { phone: row.phone } : {}),
+      ...(row.profileSource ? { profileSource: row.profileSource } : {}),
+      ...(row.profileAsOf ? { profileAsOf: row.profileAsOf } : {}),
     }));
     return this.envelope(companies);
   }

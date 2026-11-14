@@ -22,10 +22,13 @@ production until its capability passes Phase 0.
 > **Personal research mode (2026-11-04).** `docs/PERSONAL_MODE.md` defines the
 > single-user prototype that syncs locally supplied free/public data into
 > SQLite. It can exercise market overview, price charts, indicators, local
-> watchlists/portfolio when the operator supplies the data. It does **not**
-> unlock fundamentals history, floorsheet history, corporate-action adjustment,
-> delisted securities, or historical intraday, and it changes no Phase 0 status
-> below.
+> watchlists/portfolio when the operator supplies the data. Public web helpers
+> add company profiles, displayed key ratios, corporate-action history, the
+> latest floorsheet, broker flows derived from it, the IPO pipeline, news and
+> mutual-fund NAVs (all unverified). It does **not** unlock audited multi-year
+> fundamentals, historical floorsheet, corporate-action-adjusted prices,
+> delisted securities, mutual-fund holdings or historical intraday, and it
+> changes no Phase 0 status below.
 
 Priority: **P0** = MVP, **P1** = next, **P2** = later.
 

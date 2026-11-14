@@ -98,6 +98,21 @@ export interface Company {
   sector: string;
   instrumentType: string;
   status: string;
+  email?: string;
+  website?: string;
+  regulatoryBody?: string;
+  listedAt?: string;
+  marketCap?: number;
+  /** Unofficial public profile fields. */
+  sharesOutstanding?: number;
+  paidUpValue?: number;
+  totalPaidUpValue?: number;
+  operationDate?: string;
+  registrar?: string;
+  address?: string;
+  phone?: string;
+  profileSource?: string;
+  profileAsOf?: string;
 }
 
 export interface Candle {
@@ -313,6 +328,167 @@ export interface IndicesResponse {
   dataState: DataStateSummary;
 }
 
+export interface MetricValue {
+  metric: string;
+  value: number | null;
+  unit: string;
+  currency?: string;
+  period?: string;
+  fiscalYear?: string;
+  quarter?: number;
+  reportedAt?: string;
+  source?: string;
+  confidence: string;
+  notes?: string;
+}
+
+export interface FundamentalsSnapshot {
+  symbol: string;
+  asOf: string;
+  period: string;
+  fiscalYear?: string;
+  quarter?: number;
+  metrics: Record<string, MetricValue>;
+  sourceUrl?: string;
+  reportedAt?: string;
+}
+
+export interface FundamentalsResponse {
+  providerId: string;
+  symbol: string;
+  latest: FundamentalsSnapshot | null;
+  history: FundamentalsSnapshot[];
+  provenance: {
+    latest: Provenance | null;
+    history: Provenance | null;
+  };
+  dataState: DataStateSummary;
+}
+
+export interface FundamentalsIndexResponse {
+  providerId: string;
+  symbols: string[];
+}
+
+export interface CorporateAction {
+  symbol: string;
+  type: string;
+  ratio?: string;
+  value?: number;
+  currency?: string;
+  announcedAt?: string;
+  exDate?: string;
+  recordDate?: string;
+  sourceUrl?: string;
+  notes?: string;
+}
+
+export interface CorporateActionsResponse {
+  providerId: string;
+  symbol: string;
+  actions: CorporateAction[];
+  provenance: Provenance | null;
+  dataState: DataStateSummary;
+}
+
+export interface CorporateActionsIndexResponse {
+  providerId: string;
+  symbols: string[];
+}
+
+export interface NewsItem {
+  id: string;
+  title: string;
+  url: string;
+  publishedAt: string;
+  source: string;
+  symbols: string[];
+  summary?: string;
+  fetchedAt?: string;
+}
+
+export interface NewsResponse {
+  providerId: string;
+  news: NewsItem[];
+  provenance: Provenance | null;
+  dataState: DataStateSummary;
+}
+
+export interface Ipo {
+  id: string;
+  companyName: string;
+  symbol?: string;
+  type: string;
+  openDate?: string;
+  closeDate?: string;
+  price?: number;
+  units?: number;
+  status: string;
+  sourceUrl?: string;
+  notes?: string;
+}
+
+export interface IposResponse {
+  providerId: string;
+  ipos: Ipo[];
+  provenance: Provenance | null;
+  dataState: DataStateSummary;
+}
+
+export interface FloorsheetTrade {
+  contractId: string;
+  businessDate: string;
+  symbol: string;
+  buyerBroker: string;
+  sellerBroker: string;
+  quantity: number;
+  rate: number;
+  amount: number;
+  asOf?: string;
+}
+
+export interface FloorsheetResponse {
+  providerId: string;
+  date: string | null;
+  trades: FloorsheetTrade[];
+  availableDates: string[];
+  provenance: Provenance | null;
+  dataState: DataStateSummary;
+}
+
+export interface BrokerFlow {
+  brokerId: string;
+  businessDate: string;
+  buyQuantity: number;
+  buyAmount: number;
+  sellQuantity: number;
+  sellAmount: number;
+  netQuantity: number;
+  netAmount: number;
+  symbols?: string[];
+}
+
+export interface BrokerFlowsResponse {
+  providerId: string;
+  date: string | null;
+  flows: BrokerFlow[];
+  availableDates: string[];
+  provenance: Provenance | null;
+  dataState: DataStateSummary;
+}
+
+export interface MutualFundNav {
+  symbol: string;
+  asOf: string | null;
+  period: string | null;
+  metrics: Record<string, MetricValue>;
+}
+
+export interface MutualFundsResponse {
+  providerId: string;
+  funds: MutualFundNav[];
+}
+
 export interface CandlesResponse {
   providerId: string;
   symbol: string;
@@ -357,6 +533,12 @@ export interface ImportResult {
     candleRows: number;
     quotes: number;
     snapshots: number;
+    fundamentals?: number;
+    corporateActions?: number;
+    ipos?: number;
+    news?: number;
+    floorsheetTrades?: number;
+    brokerFlows?: number;
     written: boolean;
     failedSymbols: string[];
     warnings: string[];

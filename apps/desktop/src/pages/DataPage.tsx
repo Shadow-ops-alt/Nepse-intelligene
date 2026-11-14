@@ -231,10 +231,12 @@ export function DataPage({
         footer={
           <>
             A capability the provider implements is not proof that data exists:
-            this source publishes no floorsheet, fundamentals, corporate actions,
-            live quotes or sector sub-indices, so those stay unavailable and are
-            never filled with mock or inferred values. Indicators, breadth and
-            sector heat elsewhere in the app are labelled{" "}
+            this source publishes company profiles, displayed key ratios,
+            corporate actions, the latest floorsheet, news, the IPO pipeline and
+            mutual-fund NAVs, all labelled unverified. It publishes no free
+            intraday history and no mutual-fund portfolio holdings, so those stay
+            unavailable and are never filled with mock or inferred values.
+            Indicators, breadth and sector heat elsewhere in the app are labelled{" "}
             <em>derived</em> mathematics on the stored end-of-day closes.
           </>
         }
@@ -621,15 +623,20 @@ export function DataPage({
 
       <Card title="What the free edition cannot do" subtitle="Honest limits">
         <ul className="limits">
-          <li>No five-year fundamentals history or valuation screens.</li>
-          <li>No historical floorsheet or broker-flow analytics.</li>
           <li>
-            No market-wide transactions/scrips totals or official sector
-            sub-indices. Market turnover is shown only because the archive’s
-            NEPSE index file reports it; the sector heatmap is an
-            equal-weighted average, clearly labelled derived.
+            No verified multi-year fundamentals history; key ratios are the
+            latest values the public pages display, not audited statements.
           </li>
-          <li>No live or intraday prices: every price is an end-of-day close.</li>
+          <li>
+            No historical floorsheet or broker-flow archive: only the latest
+            public trading day is stored, and broker flows are derived from it.
+          </li>
+          <li>
+            No free intraday or live prices: every price is an end-of-day close.
+          </li>
+          <li>
+            No mutual-fund portfolio holdings; only the published NAV series.
+          </li>
           <li>
             No corporate-action adjustment; long-window indicators are flagged.
           </li>
@@ -638,6 +645,10 @@ export function DataPage({
             survivorship-biased.
           </li>
           <li>Free sources can change or disappear without notice.</li>
+          <li>
+            Redistribution rights for the public web sources are unverified; do
+            not publish a database containing this data.
+          </li>
         </ul>
         <p className="muted small">
           Switching to a licensed provider creates a new namespace in the same

@@ -5,7 +5,10 @@ import { formatCompact, formatNumber } from "../api";
 import type {
   CandlesResponse,
   CompaniesResponse,
+  FloorsheetResponse,
   IndicesResponse,
+  IposResponse,
+  NewsResponse,
   Quote,
   QuotesResponse,
   ScreenerResponse,
@@ -56,6 +59,9 @@ export function MarketPage({
   const companiesState = useApi<CompaniesResponse>("/api/companies");
   const indicesState = useApi<IndicesResponse>("/api/indices");
   const screenerState = useApi<ScreenerResponse>("/api/screener");
+  const newsState = useApi<NewsResponse>("/api/news");
+  const iposState = useApi<IposResponse>("/api/ipos");
+  const floorsheetState = useApi<FloorsheetResponse>("/api/floorsheet");
 
   const [moverTab, setMoverTab] = useState<MoverTab>("gainers");
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
@@ -139,6 +145,13 @@ export function MarketPage({
       : null;
 
   const screenerRows = screenerState.data?.rows ?? [];
+  const newsItems = newsState.data?.news ?? [];
+  const ipos = iposState.data?.ipos ?? [];
+  const floorsheetTrades = floorsheetState.data?.trades ?? [];
+  const floorsheetTop = useMemo(
+    () => [...floorsheetTrades].sort((a, b) => b.amount - a.amount).slice(0, 15),
+    [floorsheetTrades],
+  );
   const trendBreadth = useMemo(() => {
     const eligible = screenerRows.filter((row) => {
       const company = companyBySymbol.get(row.symbol);
@@ -554,6 +567,128 @@ export function MarketPage({
           </p>
         )}
       </Card>
+
+      <Card
+        title="Latest floorsheet"
+        subtitle={
+          floorsheetState.data?.date
+            ? `Largest contracts on ${floorsheetState.data.date}`
+            : "Most recent public floorsheet"
+        }
+        action={<Badge tone="warn">unofficial</Badge>}
+        footer="Only the latest trading day is published on the free public page. Broker flows are aggregated from these stored trades, never fetched separately."
+      >
+        {floorsheetState.loading ? (
+          <Spinner label="Loading floorsheet" />
+        ) : floorsheetTop.length === 0 ? (
+          <EmptyState title="No floorsheet stored">
+            Run <code>pnpm personal:update</code> with the public web datasets
+            enabled.
+          </EmptyState>
+        ) : (
+          <div className="table-scroll short">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Symbol</th>
+                  <th>Buyer</th>
+                  <th>Seller</th>
+                  <th className="right">Quantity</th>
+                  <th className="right">Rate</th>
+                  <th className="right">Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {floorsheetTop.map((trade) => (
+                  <tr key={trade.contractId}>
+                    <td>
+                      <strong>{trade.symbol}</strong>
+                    </td>
+                    <td className="muted">{trade.buyerBroker}</td>
+                    <td className="muted">{trade.sellerBroker}</td>
+                    <td className="right">{formatNumber(trade.quantity, 0)}</td>
+                    <td className="right">{formatNumber(trade.rate)}</td>
+                    <td className="right">Rs {formatCompact(trade.amount)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+
+      <div className="grid main-side">
+        <Card
+          title="IPO & issue pipeline"
+          subtitle="Upcoming and recent public issues"
+          action={<Badge tone="warn">unofficial</Badge>}
+          footer="ShareSansar's upcoming-issue list. Dates and units are shown as published; missing fields stay blank."
+        >
+          {iposState.loading ? (
+            <Spinner label="Loading issue pipeline" />
+          ) : ipos.length === 0 ? (
+            <EmptyState title="No issues stored" />
+          ) : (
+            <div className="table-scroll short">
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th>Company</th>
+                    <th>Type</th>
+                    <th>Application date</th>
+                    <th className="right">Units</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ipos.slice(0, 20).map((ipo) => (
+                    <tr key={ipo.id}>
+                      <td>
+                        <strong>{ipo.symbol ?? ipo.companyName}</strong>
+                        <span className="cell-sub">{ipo.companyName}</span>
+                      </td>
+                      <td>
+                        <Badge tone="info">{ipo.type}</Badge>
+                      </td>
+                      <td className="muted">{ipo.openDate ?? "—"}</td>
+                      <td className="right">
+                        {ipo.units === undefined ? "—" : formatNumber(ipo.units, 0)}
+                      </td>
+                      <td className="muted">{ipo.status}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+
+        <Card
+          title="Market news"
+          subtitle="Latest headlines from the public sources"
+          action={<Badge tone="warn">unofficial</Badge>}
+        >
+          {newsState.loading ? (
+            <Spinner label="Loading news" />
+          ) : newsItems.length === 0 ? (
+            <EmptyState title="No news stored" />
+          ) : (
+            <ul className="news-list">
+              {newsItems.slice(0, 12).map((item) => (
+                <li key={item.id}>
+                  <a href={item.url} target="_blank" rel="noreferrer">
+                    {item.title}
+                  </a>
+                  <span className="muted small">
+                    {" "}
+                    · {item.source} · {item.publishedAt.slice(0, 16).replace("T", " ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Card>
+      </div>
 
       <Card
         title="Candlestick signals on the last session"

@@ -1,13 +1,14 @@
 # Data Sources and Licensing
 
-Last probed: **2026-11-04** (Asia/Kathmandu). Results are observations, not a
+Last probed: **2026-11-14** (Asia/Kathmandu). Results are observations, not a
 license or a guarantee. Re-run `pnpm phase0:validate` against the current
 provider before relying on any row.
 
-The document has two parts. The **verified public archive** section below is the
-only acquisition path the shipped Free Edition uses. The **unofficial NEPSE
-endpoint** analysis is the original Phase 0 probe and remains the reference for
-why the live/unofficial path is not shipped.
+The document has two parts. The **verified public archive** section below,
+together with the public ShareSansar/Merolagani pages, is the acquisition path
+the shipped Free Edition uses. The **unofficial NEPSE endpoint** analysis is the
+original Phase 0 probe and remains the reference for why the authenticated
+live/unofficial path is not shipped.
 
 ## Verified public archive (Free Edition primary source)
 
@@ -72,8 +73,10 @@ Provenance and limitations:
   historical rows disagree with the previous-valid-close change by more than
   0.02 percentage points. The latest session had zero mismatches. The app stores
   the **computed** change, never the source field.
-- No daily market-wide transactions/scrips totals, sector sub-indices,
-  floorsheet, fundamentals, or corporate-action history.
+- The archive itself has no daily market-wide transactions/scrips totals,
+  sector sub-indices, floorsheet, fundamentals, or corporate-action history.
+  The public web helpers (section 2) add the latest values for those datasets;
+  they do not reconstruct their history.
 
 Acquisition command:
 
@@ -88,7 +91,36 @@ writing the database. Both commands reuse a local clone for 30 minutes by
 default, record every attempt in `data/reports/provider-health.json`, and never
 delete the database or previously valid rows when a refresh fails.
 
-### 2. `srijankarki07/nepse-data` — cross-check only, not installed
+### 2. ShareSansar and Merolagani public pages — installed by explicit fetch
+
+These pages fill the datasets the git archive does not publish. They are read
+only when the operator runs `pnpm personal:details` or `pnpm personal:bulk`;
+the app never fetches in the background. Every response is preserved as a
+content-addressed snapshot under `data/source/web/` with its URL, fetch time,
+status and hash.
+
+| Source | Datasets | Verified behaviour (2026-11-14) |
+|---|---|---|
+| ShareSansar | Company profile/contact/registrar, shares outstanding, market summary, sub-index history, current-day prices, IPO/issue pipeline, mutual-fund NAV, news | Server-rendered pages plus JSON endpoints; AJAX endpoints require `X-Requested-With: XMLHttpRequest`; index history accepts `length=-1` |
+| Merolagani | Shares outstanding cross-check, EPS and fiscal period, P/E, book value, P/B, market cap, dividend/bonus/right history, latest floorsheet, NEPSE index cross-check, news | Floorsheet is server-rendered ASP.NET and paginated (500 rows/page); all pages are fetched and deduplicated by contract id |
+| SEBON | IPO/rights/mutual-fund scheme reference | Reference only; not imported as a market dataset |
+
+Important limitations:
+
+- Only the **latest trading day's** floorsheet is published on the free page.
+  Broker flows are aggregated from those stored trades, never fetched
+  separately.
+- Fundamentals are the values the public page displays (often the latest
+  quarter plus selected history), not an audited five-year statement series.
+- Cross-source disagreements above a small threshold are recorded in
+  `reports/company-details.json`; the existing value is kept.
+- Requests are spaced by about 1.2 s per host, retried with backoff, and cached
+  for 12 hours by default. A full 285-company details pass takes roughly
+  10–25 minutes.
+- `robots.txt` allowed the probed paths on 2026-11-14 (Merolagani returned 404),
+  but that is not a redistribution licence.
+
+### 3. `srijankarki07/nepse-data` — cross-check only, not installed
 
 | | |
 |---|---|
@@ -105,7 +137,7 @@ index history is too short for the market overview. The npm package
 `srijankarki07/nepse-client` is a client for this archive, not a data source of
 its own.
 
-### 3. Sources rejected or not used
+### 4. Sources rejected or not used
 
 | Source | Result |
 |---|---|
@@ -118,34 +150,42 @@ its own.
 | `shawinCreates/Nepse-Market-Data` | Scraped ShareSansar archive; licence/provenance not established. |
 | Paid/licensed vendors | Not contracted; the licensed provider remains a drop-in upgrade path. |
 
-### 4. Datasets installed by the Free Edition
+### 5. Datasets installed by the Free Edition
 
-| Dataset | Priority | Installed? | Canonical file |
+| Dataset | Priority | Installed (2026-11-14) | Canonical file |
 |---|---|---|---|
-| Company/security master | P0 | Yes, 468 rows | `companies.csv`, `securities.csv` |
-| Historical EOD prices | P0 | Yes, 478,867 rows, 468 series | `ohlc/<SYMBOL>.csv` |
-| Latest available prices | P0 | Yes, 279 end-of-day quotes | `quotes.csv` |
-| NEPSE index history | P1 | Yes, 6,657 rows | `indices/NEPSE.csv`, `indices.csv` |
+| Company/security master | P0 | Yes, 468 rows + public profile fields | `companies.csv`, `securities.csv` |
+| Historical EOD prices | P0 | Yes, 480,234 rows, 468 series | `ohlc/<SYMBOL>.csv` |
+| Latest available prices | P0 | Yes, 334 end-of-day equity quotes | `quotes.csv` |
+| NEPSE index history | P1 | Yes, 6,661 rows | `indices/NEPSE.csv`, `indices.csv` |
+| Sub-index history | P1 | Yes, 17 index files, 19,556 rows in a 5-year pull | `indices/<INDEX>.csv` |
 | Sector classification | P1 | Yes, partial (source blanks preserved) | `companies.csv` |
-| Daily market statistics | P1 | No — transactions/scrips totals not published | not written |
-| Sector/sub-indices | P1 | No — sector index values not published | not written |
-| Floorsheet | P2 | No | unavailable |
-| Fundamentals | P2 | No | unavailable |
-| Corporate actions | P2 | No | unavailable |
+| Daily market statistics | P1 | Yes, latest session | `market-summary.csv` |
+| Sector performance | P1 | Yes, 13 sectors | `sector-performance.csv` |
+| Floorsheet | P2 | Yes, latest session only (31,299 trades) | `floorsheet/<DATE>.csv` |
+| Fundamentals / key ratios | P2 | Yes, 285 companies (latest displayed periods) | `fundamentals/<SYMBOL>.csv` |
+| Corporate actions | P2 | Yes, displayed dividend/bonus/right history | `corporate-actions.csv` |
+| IPO / issue pipeline | P2 | Yes, 203 issues | `ipos.csv` |
+| Market news | P2 | Yes, latest 8 headlines | `news.csv` |
+| Mutual-fund NAV | P2 | Yes, 47 funds | `fundamentals/<FUND>.csv` |
 
-The absence of `market-summary.csv` and `sector-performance.csv` is deliberate.
-The UI keeps those datasets unavailable rather than deriving them from quotes or
-inventing values. The NEPSE index level is shown from real stored index candles,
-which is a different dataset from the unavailable market-wide summary.
+Missing datasets stay unavailable. The UI does not derive transactions/scrip
+totals from quotes, synthesize index values, or fill absent fundamentals. The
+latest session is published by the free pages; historical floorsheet depth and
+multi-year fundamentals remain unavailable. If `personal:bulk` has not run,
+`market-summary.csv` and `sector-performance.csv` are absent and those panels
+show unavailable rather than invented values.
 
-### 5. Update, caching, and failure behaviour
+### 6. Update, caching, and failure behaviour
 
-- `pnpm personal:update` is the only update entry point; the app never fetches
-  in the background.
-- The source is a public git repository. A shallow clone/fetch is used, not a
-  REST loop.
-- Fetches are cached for 30 minutes by default (`--max-age-minutes`).
-- Git network operations retry three times with 1 s, 2 s, and 4 s backoff.
+- `pnpm personal:update`, `personal:details` and `personal:bulk` are explicit
+  entry points; the app never fetches in the background.
+- The archive source is a public git repository. A shallow clone/fetch is used,
+  not a REST loop. Web pages use throttled GET/POST with cached responses.
+- Archive fetches are cached for 30 minutes by default; web pages use a
+  12-hour page cache (`--max-age-minutes`/`--force` override it).
+- Git network operations and web requests retry with exponential backoff
+  (the web client uses 3 attempts with 0.75 s, 1.5 s, 3 s delays).
 - A failed fetch leaves the previous canonical files and database untouched and
   records the failure plus a consecutive-failure count in
   `reports/provider-health.json`.
@@ -159,10 +199,14 @@ which is a different dataset from the unavailable market-wide summary.
   a manifest containing the URL, commit, retrieval time, licence, attribution,
   and hashes of the symbol master and index file.
 
-### 6. Attribution
+### 7. Attribution
 
 - `binayabaral/nepal-market-data` (MIT), the compiled public archive.
-- `sharesansar.com`, the daily NEPSE price and index publisher used upstream.
+- `sharesansar.com`, the public price, profile, issue, NAV and news publisher.
+- `merolagani.com`, the public profile, ratio, corporate-action, floorsheet and
+  news publisher.
+- `sebon.gov.np`, the securities regulator, used only as an IPO/rights
+  reference.
 - `Aabishkar2/nepse-data`, the historical OHLC source credited upstream.
 
 Do not redistribute the raw data or a database containing it. The Free Edition
@@ -194,11 +238,12 @@ is a local, single-user research tool, not a data-redistribution product.
 
 ## Authentication and access
 
-The shipped Free Edition makes **no** runtime call to NEPSE or ShareSansar. Its
-only acquisition path is the explicit `pnpm personal:update` command, which reads
-the public git archive described above. The unofficial endpoint analysis in this
-section is retained because it explains why that path remains blocked for
-production.
+The shipped Free Edition makes **no background** call to NEPSE, ShareSansar or
+Merolagani. Acquisition happens only when the operator explicitly runs
+`pnpm personal:update`, `personal:details` or `personal:bulk`. This section
+retains the original authenticated NEPSE endpoint analysis because that path
+remains blocked for production: it needs a session token and a bundled
+reverse-engineered WASM helper, neither of which is shipped.
 
 The unofficial wrapper obtains a Nepali stock-exchange session token through
 `/api/authenticate/prove`, a bundled WebAssembly helper, and a `Salter`

@@ -24,12 +24,19 @@ licensed production.
 
 ## What the Free Edition ships
 
-- Market overview: NEPSE index level and daily index history, end-of-day
-  gainers/losers/most active, breadth, % above SMA 200, a derived
+- Market overview: NEPSE index level and daily index history, 18 sub-indices,
+  end-of-day gainers/losers/most active, breadth, % above SMA 200, a derived
   equal-weighted sector heatmap, and last-session candlestick signals. Market
-  turnover is shown when the archive's index file reports it (unverified);
-  shares/transactions/scrips totals stay unavailable unless a genuine
-  `market-summary.csv` is supplied.
+  turnover, shares, transactions and scrip totals come from the latest public
+  market summary when `personal:bulk` has run; otherwise they stay unavailable.
+- Company profiles, displayed key ratios (EPS, P/E, book value, P/B, market
+  cap), dividend/bonus/right history, the latest public floorsheet, broker
+  flows derived from it, the IPO/issue pipeline, market news, and mutual-fund
+  NAVs. Every one of these is marked unverified and carries its source URL,
+  fetched-at time and freshness state.
+- Dataset endpoints and a coverage page for floorsheet, broker flows,
+  fundamentals, corporate actions, IPOs, news and mutual funds. Missing data
+  stays unavailable; it is never synthesized.
 - Company list and search, including 468 securities with their instrument type,
   sector (or explicit `Unclassified`), and listed/merged status.
 - Daily price chart with volume.
@@ -56,27 +63,44 @@ licensed production.
   reports per-file status.
 - Packaged Electron shell that starts the local API and loads the same UI.
 
-## Acquiring the public archive
+## Acquiring public data
 
-The Free Edition ships no market data and does not fetch in the background. An
-operator can explicitly fetch the MIT-licensed public archive and import it:
+The Free Edition ships no market data and does not fetch in the background.
+An operator explicitly runs the acquisition commands:
 
 ```bash
 DATA_EDITION=free pnpm personal:update \
   --data-dir "$HOME/.config/NEPSE Terminal/data" \
   --db "$HOME/.config/NEPSE Terminal/personal.db"
+
+DATA_EDITION=free pnpm personal:details \
+  --data-dir "$HOME/.config/NEPSE Terminal/data"
+
+DATA_EDITION=free pnpm personal:bulk \
+  --data-dir "$HOME/.config/NEPSE Terminal/data"
 ```
 
-`pnpm personal:acquire` fetches and normalizes only. The command:
+`pnpm personal:update` runs `personal:acquire` and `personal:bulk`, then
+imports. `personal:details` is a separate, slower pass for per-company pages;
+run `personal:sync` afterwards. The commands:
 
-- records the exact source commit, retrieval time, licence, and attribution;
-- preserves the raw archive under `data/source/binayabaral/<commit>/`;
-- normalizes only rows that pass the app's OHLC invariants and writes every
-  excluded row to `reports/excluded-rows.csv`;
-- writes no `market-summary.csv`, `sector-performance.csv`, floorsheet, or
-  fundamentals file when the source does not publish those fields;
-- imports in the same provider namespace and reports changed/removed history;
-- leaves the previous files and database intact when a fetch fails.
+- record the exact source commit or URL, retrieval time, licence/terms status,
+  and attribution;
+- preserve the raw archive under `data/source/binayabaral/<commit>/` and every
+  fetched web response as a content-addressed snapshot under `data/source/web/`;
+- normalize only rows that pass the app's OHLC and date/symbol invariants and
+  write every excluded row to a report;
+- merge new rows without overwriting valid stored history; genuine
+  disagreements are reported rather than silently resolved;
+- import in the same provider namespace and report changed/removed history;
+- leave the previous files and database intact when a fetch fails;
+- space requests to public sites, retry transient failures with backoff, and
+  cache responses within the configured age window.
+
+ShareSansar and Merolagani currently supply profiles, key ratios, corporate
+actions, market summary, sub-indices, current-day prices and floorsheet, news,
+the IPO pipeline, and mutual-fund NAVs. SEBON pages are used only as a
+reference. Redistribution rights remain unverified.
 
 See [DATA_SOURCES.md](./DATA_SOURCES.md) for the verified coverage, rejected
 sources, and limitations.
@@ -180,37 +204,44 @@ never enter the product database.
 
 These are gated by capability, not hidden behind empty arrays:
 
-- Five-year fundamentals history and valuation screens.
-- Historical floorsheet and broker-flow analytics.
+- Verified multi-year fundamentals history and audited valuation screens. The
+  public pages expose only the latest displayed ratios and selected periods.
+- Historical floorsheet and broker-flow analytics. Only the latest public
+  trading day is available from the free pages.
 - Corporate-action-adjusted returns.
 - A guaranteed delisted/suspended history. The public archive happens to carry
   21 merged symbols, which are imported and marked `delisted`, but there is no
   complete delisting record; backtests can still be survivorship-biased.
-- Historical intraday.
-- News and filings unless the operator supplies a legitimate file.
+- Historical intraday or live prices.
+- Mutual-fund portfolio holdings (published as PDFs only).
+- Redistribution rights for the scraped public pages.
 
 If a paid provider later supplies these, the same UI can enable them without a
 data-layer rewrite.
 
 ## Legal and quality posture
 
-The Free Edition is a **local, single-user product**. It does not bundle a
-scraper, a reverse-engineered session flow, a WASM token generator, or vendor
-data.
+The Free Edition is a **local, single-user product**. It ships no vendor data,
+no reverse-engineered session flow, no authentication bypass and no WASM token
+generator. It does contain explicit, operator-invoked acquisition helpers for
+public HTML pages and JSON endpoints.
 
-- The operator supplies the files, or explicitly runs the public-archive
-  command, and is responsible for the right to use the resulting data.
+- The operator supplies the files, or explicitly runs the acquisition
+  commands, and is responsible for the right to use the resulting data.
+- The public pages' terms and redistribution rights are unverified. Treat the
+  output as research input, not as a redistributable dataset.
 - Do not redistribute raw market data or a database that contains it.
 - Free sources can be wrong, partial, revised, or withdrawn.
 - `productionReady=false` is deliberate and permanent for this edition.
 - Derived analytics are research output, not investment advice.
 
-The application itself does not bundle a scraper, a reverse-engineered session
-flow, a WASM token generator, or vendor data. The researched unofficial NEPSE
-wrapper has no licence grant and relies on an undocumented access path; it is
-not part of this repository and must not be shipped without written permission.
-If you have a source whose terms allow use, implement it as a provider adapter;
-the product does not need to change.
+The application contains explicit acquisition helpers for public HTML/JSON
+pages, but no reverse-engineered session flow, no WASM token generator, no
+authentication bypass and no bundled vendor data. The researched unofficial
+NEPSE wrapper has no licence grant and relies on an undocumented access path; it
+is not part of this repository and must not be shipped without written
+permission. If you have a source whose terms allow use, implement it as a
+provider adapter; the product does not need to change.
 
 ## Configuration
 

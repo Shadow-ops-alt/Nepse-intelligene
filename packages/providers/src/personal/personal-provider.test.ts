@@ -69,9 +69,13 @@ describe("personal free-source provider", () => {
     expect(provider.descriptor.capabilities).toEqual(
       PERSONAL_FREE_CAPABILITIES,
     );
-    expect(provider.descriptor.capabilities).not.toContain("floorsheet");
+    // Public web sources provide the latest floorsheet and displayed key
+    // ratios, but not intraday history or verified multi-year fundamentals.
+    expect(provider.descriptor.capabilities).toContain("floorsheet");
+    expect(provider.descriptor.capabilities).toContain("fundamentalsHistory");
+    expect(provider.descriptor.capabilities).not.toContain("intradayOhlc");
     expect(provider.descriptor.capabilities).not.toContain(
-      "fundamentalsHistory",
+      "mutualFundHoldings",
     );
   });
 

@@ -19,11 +19,22 @@ separate product edition, not a substitute for a licensed data agreement. See
   `FREE_EDITION_POLICY`. The licensed policy still blocks it.
 - Offline after import: charts, indicators, screener, watchlist, and portfolio
   read the local store without a network call.
+- Optional acquisition helpers for public pages: `pnpm personal:details` reads
+  company profiles and key ratios from ShareSansar and Merolagani, and
+  `pnpm personal:bulk` reads the public market summary, sub-indices, current-day
+  prices and floorsheet, news, the IPO pipeline, and mutual-fund NAVs. Both
+  write canonical CSV and raw source snapshots; they never write the database
+  directly. The operator runs them explicitly.
 
 ## What it is not
 
-- **Not** a scraper. The repository ships no vendor data and no scraping code.
-  You supply the files; you are responsible for your right to use them.
+- **Not** a licensed feed or an official NEPSE product. The helper commands
+  read public web pages whose terms and redistribution rights are unverified.
+  You supply the files or run the helpers; you are responsible for your right
+  to use and redistribute the result.
+- **Not** a complete history. Only the latest public floorsheet day, the latest
+  displayed key ratios, and the displayed corporate-action history are
+  available. Missing values are reported, never filled.
 - **Not** a licensed data feed. Prices may be partial, revised, or unadjusted.
 - **Not** redistributable as a dataset. Do not publish a database containing
   unofficial data.
@@ -46,29 +57,34 @@ separate product edition, not a substitute for a licensed data agreement. See
 
 ## Supported capabilities
 
-The default capability set is deliberately narrow:
+The default capability set covers what the public sources actually publish:
 
 | Capability | Free-source realism |
 |---|---|
-| `companyList`, `securityList` | Good, if you maintain the list |
+| `companyList`, `securityList` | Good, including public profile fields when fetched |
 | `sectors`, `indices` | Good |
 | `dailyOhlc` | Good where a public daily series exists |
-| `indexHistory` | Good |
-| `liveQuotes`, `marketSummary`, `sectorPerformance` | Snapshot only; not a reliable tick feed |
-| `floorsheet` | **Excluded** — needs history and corrections |
-| `fundamentalsHistory` | **Excluded** — five-year statements are a licensed decision |
-| `corporateActions` / adjustment factors | **Excluded** — required for honest total returns |
-| `intradayOhlc` history | **Excluded** |
+| `indexHistory` | Good; one insurance sub-index has no rows |
+| `liveQuotes`, `marketSummary`, `sectorPerformance` | Snapshot only; current-day end-of-day values, not a tick feed |
+| `floorsheet` | Latest trading day only; contract-level rows |
+| `brokerFlows` | Derived from the stored floorsheet only |
+| `fundamentals`, `fundamentalsHistory` | Latest displayed key ratios and the periods the public page shows; not audited statements |
+| `corporateActions` | Dividend, bonus and right history as displayed; no price adjustment |
+| `ipos` | ShareSansar upcoming/past issue list |
+| `news` | Latest market-wide headlines with links to the publisher |
+| `intradayOhlc` history | **Excluded** — no free historical intraday source |
+| `mutualFundHoldings` | **Excluded** — only published as PDFs |
 | delisted securities | **Excluded** |
 
-You can opt into extra file-backed capabilities with `PERSONAL_CAPABILITIES`,
+You can narrow the file-backed capability set with `PERSONAL_CAPABILITIES`,
 for example:
 
 ```bash
 PERSONAL_CAPABILITIES=companyList,dailyOhlc,fundamentals,corporateActions
 ```
 
-Opting in does not change the provenance: the data stays unofficial.
+Changing the capability list does not change the provenance: the data stays
+unofficial.
 
 ## Data layout
 
@@ -82,9 +98,17 @@ data/personal/
   indices/<INDEX>.csv        optional
   quotes.csv                 optional
   market-summary.csv         optional (summary shown as unavailable if absent)
+  sector-performance.csv     optional
+  fundamentals/<SYMBOL>.csv  optional (company ratios and mutual-fund NAVs)
+  corporate-actions.csv      optional
+  floorsheet/<DATE>.csv      optional
+  news.csv                   optional
+  ipos.csv                   optional
+  source/                    raw source snapshots and fetch manifest
 ```
 
-`data/personal/` and `data/*.db` are git-ignored. Never commit vendor data.
+`data/personal/` and `data/*.db` are git-ignored. Never commit vendor data or
+raw source snapshots.
 
 A missing `market-summary.csv` does not produce a synthetic index. The summary
 is reported unavailable, and the rest of the market page still works.
@@ -95,16 +119,35 @@ is reported unavailable, and the rest of the market page still works.
 cp .env.example .env
 # In .env: DATA_EDITION=free
 
+# Fetch the public archive and the public web datasets, then import everything.
+pnpm personal:update \
+  --data-dir ./data/personal \
+  --db ./data/personal.db \
+  --from 1990-01-01 \
+  --to 2026-11-14
+
+# Optional: fetch company profiles, key ratios and corporate actions.
+pnpm personal:details --data-dir ./data/personal
+
+# Optional: refresh only the public web datasets.
+pnpm personal:bulk --data-dir ./data/personal
+
+# Import whatever is on disk without fetching.
 pnpm personal:sync \
   --data-dir ./data/personal \
   --db ./data/personal.db \
   --from 2021-11-04 \
-  --to 2026-11-03
+  --to 2026-11-14
 
 pnpm personal:status
 pnpm personal:candles NABIL --limit 20
 pnpm personal:analyze NABIL
 ```
+
+`personal:update` runs the archive import and `personal:bulk`; run
+`personal:details` afterwards and then `personal:sync` to import the profiles
+and corporate actions. `personal:details` is the slow step: it spaces requests
+to the public sites and can take 10–25 minutes for all active equities.
 
 The same import is available in the UI's **Data → Import wizard**, including a
 file checklist, a preview that writes nothing, and the import history.
@@ -137,8 +180,10 @@ You can still run the Phase 0 harness against this provider:
 pnpm phase0:validate --provider personal --allow-unofficial
 ```
 
-Expect capability-coverage failures for floorsheet and fundamentals history.
-That is correct: this data path cannot satisfy the licensed Release 1 gate.
+Expect capability-coverage failures for intraday history, mutual-fund holdings
+and delisted securities. That is correct: this data path cannot satisfy the
+licensed Release 1 gate, and the stored floorsheet/fundamentals coverage is not
+equivalent to a licensed history.
 
 ## Local storage
 

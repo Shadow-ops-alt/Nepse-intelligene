@@ -5,9 +5,10 @@ export const PERSONAL_PROVIDER_ID = "free-source";
 
 /**
  * Capabilities that free/public sources can realistically support for a
- * single-user research prototype. Floorsheet, multi-year fundamentals,
- * intraday history, corporate-action adjustment, and delisted securities are
- * deliberately excluded: they need a licensed extract or a paid provider.
+ * single-user research prototype. Intraday history, verified multi-year
+ * fundamentals, corporate-action adjustment, mutual-fund portfolio holdings
+ * and delisted securities are deliberately excluded: they need a licensed
+ * extract or a paid provider.
  */
 export const PERSONAL_FREE_CAPABILITIES: Capability[] = [
   "companyList",
@@ -19,6 +20,13 @@ export const PERSONAL_FREE_CAPABILITIES: Capability[] = [
   "liveQuotes",
   "marketSummary",
   "sectorPerformance",
+  "floorsheet",
+  "brokerFlows",
+  "fundamentals",
+  "fundamentalsHistory",
+  "corporateActions",
+  "ipos",
+  "news",
 ];
 
 export interface PersonalProviderConfig {
@@ -38,8 +46,9 @@ export interface PersonalProviderConfig {
  * `productionReady=false`. The runtime policy therefore blocks it in
  * production, and `createMeta` rejects any attempt to relabel it.
  *
- * This is a data-plumbing adapter, not a scraper. The operator supplies the
- * files; the repository ships no vendor data.
+ * This is the import adapter only. Optional acquisition helpers for public
+ * web pages live in `packages/personal/src/web` and run only when the operator
+ * explicitly invokes them; the repository ships no vendor data.
  */
 export function createPersonalFreeProvider(
   config: PersonalProviderConfig,

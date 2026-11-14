@@ -464,6 +464,27 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             "sectorPerformance",
             "latest",
           );
+          const ipoSnapshot = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "ipos",
+            "all",
+          );
+          const newsSnapshot = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "news",
+            "latest",
+          );
+          const floorsheetDays = store.countSnapshots(providerId, "floorsheet");
+          const brokerFlowDays = store.countSnapshots(providerId, "brokerFlows");
+          const fundamentalKeys = store.countSnapshots(providerId, "fundamentals");
+          const historyKeys = store.countSnapshots(
+            providerId,
+            "fundamentalsHistory",
+          );
+          const corporateActionKeys = store.countSnapshots(
+            providerId,
+            "corporateActions",
+          );
           const derivedFromMaster = new Set<Capability>(["sectors", "indices"]);
           // "available" above is what the provider can read. "datasets" is what
           // is actually stored, so a capability is never mistaken for data.
@@ -509,6 +530,56 @@ export function createApiServer(config: ApiConfig): ApiHandle {
                   Array.isArray(sectorSnapshot?.data) &&
                   sectorSnapshot.data.length > 0;
                 session = present ? "eod" : null;
+                break;
+              case "floorsheet":
+                present = floorsheetDays > 0;
+                session = present ? "eod" : null;
+                note = present
+                  ? `${floorsheetDays} stored trading day${floorsheetDays === 1 ? "" : "s"}`
+                  : "only the latest public floorsheet page is available";
+                break;
+              case "brokerFlows":
+                present = brokerFlowDays > 0;
+                session = present ? "eod" : null;
+                note = "derived from the stored floorsheet";
+                break;
+              case "fundamentals":
+                present = fundamentalKeys > 0;
+                session = present ? "eod" : null;
+                note = present
+                  ? "latest displayed key ratios per company (not audited history)"
+                  : null;
+                break;
+              case "fundamentalsHistory":
+                present = historyKeys > 0;
+                session = present ? "eod" : null;
+                note = present
+                  ? "only the periods the public pages display"
+                  : null;
+                break;
+              case "corporateActions":
+                present = corporateActionKeys > 0;
+                session = present ? "eod" : null;
+                note = "dividend/bonus/right history as displayed by Merolagani";
+                break;
+              case "ipos":
+                present =
+                  Array.isArray(ipoSnapshot?.data) && ipoSnapshot.data.length > 0;
+                session = present ? "eod" : null;
+                note = "ShareSansar upcoming/past issue list";
+                break;
+              case "news":
+                present =
+                  Array.isArray(newsSnapshot?.data) && newsSnapshot.data.length > 0;
+                session = present ? "eod" : null;
+                break;
+              case "intradayOhlc":
+                session = null;
+                note = "no free historical intraday source";
+                break;
+              case "mutualFundHoldings":
+                session = null;
+                note = "portfolio holdings are only published as PDFs";
                 break;
               default:
                 present = false;
@@ -675,6 +746,233 @@ export function createApiServer(config: ApiConfig): ApiHandle {
               ),
             ),
           });
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/news") {
+          const entry = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "news",
+            "latest",
+          );
+          const view = entry
+            ? provenanceView(entry.provenance, "news")
+            : null;
+          sendJson(response, 200, {
+            providerId,
+            news: entry?.data ?? [],
+            provenance: view,
+            dataState: summarizeProvenance(view ? [view] : []),
+          });
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/ipos") {
+          const entry = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "ipos",
+            "all",
+          );
+          const view = entry ? provenanceView(entry.provenance, "ipos") : null;
+          sendJson(response, 200, {
+            providerId,
+            ipos: entry?.data ?? [],
+            provenance: view,
+            dataState: summarizeProvenance(view ? [view] : []),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/fundamentals"
+        ) {
+          const symbol = (url.searchParams.get("symbol") ?? "").toUpperCase();
+          if (!symbol) {
+            sendJson(response, 200, {
+              providerId,
+              symbols: store.listSnapshotKeys(providerId, "fundamentals"),
+            });
+            return;
+          }
+          const latest = store.getSnapshotWithProvenance(
+            providerId,
+            "fundamentals",
+            symbol,
+          );
+          const history = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "fundamentalsHistory",
+            symbol,
+          );
+          if (!latest && !history) {
+            sendJson(response, 404, {
+              providerId,
+              symbol,
+              error: "no stored fundamentals for this symbol",
+            });
+            return;
+          }
+          const latestView = latest
+            ? provenanceView(latest.provenance, "fundamentals")
+            : null;
+          const historyView = history
+            ? provenanceView(history.provenance, "fundamentalsHistory")
+            : null;
+          sendJson(response, 200, {
+            providerId,
+            symbol,
+            latest: latest?.data ?? null,
+            history: history?.data ?? [],
+            provenance: { latest: latestView, history: historyView },
+            dataState: summarizeProvenance(
+              [latestView, historyView].filter(
+                (view): view is ProvenanceView => view !== null,
+              ),
+            ),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/corporate-actions"
+        ) {
+          const symbol = (url.searchParams.get("symbol") ?? "").toUpperCase();
+          if (!symbol) {
+            sendJson(response, 200, {
+              providerId,
+              symbols: store.listSnapshotKeys(providerId, "corporateActions"),
+            });
+            return;
+          }
+          const entry = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "corporateActions",
+            symbol,
+          );
+          const view = entry
+            ? provenanceView(entry.provenance, "corporateActions")
+            : null;
+          sendJson(response, 200, {
+            providerId,
+            symbol,
+            actions: entry?.data ?? [],
+            provenance: view,
+            dataState: summarizeProvenance(view ? [view] : []),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/floorsheet"
+        ) {
+          const dates = store.listSnapshotKeys(providerId, "floorsheet");
+          const date = url.searchParams.get("date") ?? dates[0];
+          if (!date) {
+            sendJson(response, 200, {
+              providerId,
+              date: null,
+              trades: [],
+              availableDates: [],
+              dataState: summarizeProvenance([]),
+            });
+            return;
+          }
+          const entry = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "floorsheet",
+            date,
+          );
+          const view = entry
+            ? provenanceView(entry.provenance, "floorsheet")
+            : null;
+          sendJson(response, 200, {
+            providerId,
+            date,
+            trades: entry?.data ?? [],
+            availableDates: dates,
+            provenance: view,
+            dataState: summarizeProvenance(view ? [view] : []),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/broker-flows"
+        ) {
+          const dates = store.listSnapshotKeys(providerId, "brokerFlows");
+          const date = url.searchParams.get("date") ?? dates[0];
+          if (!date) {
+            sendJson(response, 200, {
+              providerId,
+              date: null,
+              flows: [],
+              availableDates: [],
+              dataState: summarizeProvenance([]),
+            });
+            return;
+          }
+          const entry = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "brokerFlows",
+            date,
+          );
+          const view = entry
+            ? provenanceView(entry.provenance, "brokerFlows")
+            : null;
+          sendJson(response, 200, {
+            providerId,
+            date,
+            flows: entry?.data ?? [],
+            availableDates: dates,
+            provenance: view,
+            dataState: summarizeProvenance(view ? [view] : []),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/mutual-funds"
+        ) {
+          const symbols = store.listSnapshotKeys(providerId, "fundamentals");
+          const funds = symbols
+            .map((symbol) => {
+              const entry = store.getSnapshotWithProvenance<{
+                asOf?: string;
+                period?: string;
+                metrics?: Record<
+                  string,
+                  { value?: number; unit?: string; reportedAt?: string }
+                >;
+              }>(providerId, "fundamentals", symbol);
+              const metrics = entry?.data?.metrics ?? {};
+              const navMetrics = Object.fromEntries(
+                Object.entries(metrics).filter(([name]) =>
+                  [
+                    "nav",
+                    "navDaily",
+                    "navWeekly",
+                    "navMonthly",
+                    "close",
+                    "fundSize",
+                    "premiumDiscountPercent",
+                  ].includes(name),
+                ),
+              );
+              if (Object.keys(navMetrics).length === 0) return null;
+              return {
+                symbol,
+                asOf: entry?.data?.asOf ?? null,
+                period: entry?.data?.period ?? null,
+                metrics: navMetrics,
+              };
+            })
+            .filter((fund): fund is NonNullable<typeof fund> => fund !== null);
+          sendJson(response, 200, { providerId, funds });
           return;
         }
 
@@ -1041,6 +1339,7 @@ export function createApiServer(config: ApiConfig): ApiHandle {
               to,
               dryRun: true,
               files: inspection.presentFiles,
+              dataDir: config.dataDir,
             });
             sendJson(response, 200, {
               preview: result,
@@ -1119,6 +1418,7 @@ export function createApiServer(config: ApiConfig): ApiHandle {
               from,
               to,
               files: inspection.presentFiles,
+              dataDir: config.dataDir,
               ...(typeof body.index === "string" &&
               /^[A-Za-z0-9_-]{1,32}$/.test(body.index)
                 ? { indexSymbol: body.index }

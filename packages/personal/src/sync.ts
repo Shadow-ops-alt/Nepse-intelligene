@@ -3,17 +3,26 @@ import {
   DataValidationError,
   MarketDataService,
   ProviderRegistry,
+  type BrokerFlow,
   type Candle,
   type Company,
+  type CorporateAction,
   type DataEnvelope,
+  type FloorsheetTrade,
+  type FundamentalsSnapshot,
+  type Ipo,
   type MarketDataProvider,
   type MarketIndex,
   type MarketSummary,
+  type NewsItem,
   type Quote,
   type RuntimePolicy,
   type SectorPerformance,
 } from "@stock/core";
 import type { PersonalStore } from "@stock/store";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+import { floorsheetDates, fundamentalSymbols } from "./web/bulk";
 
 export interface SyncOptions {
   provider: MarketDataProvider;
@@ -23,6 +32,8 @@ export interface SyncOptions {
   to: string;
   symbols?: string[];
   indexSymbol?: string;
+  /** Data directory, used to discover floorsheet/fundamentals files. */
+  dataDir?: string;
   /** Validate and count without writing anything (import preview). */
   dryRun?: boolean;
   /** Relative file names that were present, for the import audit. */
@@ -38,6 +49,12 @@ export interface SyncResult {
   candleRows: number;
   quotes: number;
   snapshots: number;
+  fundamentals: number;
+  corporateActions: number;
+  ipos: number;
+  news: number;
+  floorsheetTrades: number;
+  brokerFlows: number;
   written: boolean;
   failedSymbols: string[];
   warnings: string[];
@@ -159,6 +176,12 @@ export async function syncPersonalData(
   let candleRows = 0;
   let quoteRows = 0;
   let snapshotRows = 0;
+  let fundamentals = 0;
+  let corporateActions = 0;
+  let ipos = 0;
+  let news = 0;
+  let floorsheetTrades = 0;
+  let brokerFlows = 0;
 
   try {
     let symbols = (options.symbols ?? []).map((symbol) =>
@@ -169,6 +192,25 @@ export async function syncPersonalData(
     let quotesEnvelope: DataEnvelope<Quote[]> | null = null;
     let summaryEnvelope: DataEnvelope<MarketSummary> | null = null;
     let sectorEnvelope: DataEnvelope<SectorPerformance[]> | null = null;
+    const fundamentalEnvelopes: Array<{
+      symbol: string;
+      latest: DataEnvelope<FundamentalsSnapshot>;
+      history: DataEnvelope<FundamentalsSnapshot[]>;
+    }> = [];
+    const corporateActionEnvelopes: Array<{
+      symbol: string;
+      envelope: DataEnvelope<CorporateAction[]>;
+    }> = [];
+    let iposEnvelope: DataEnvelope<Ipo[]> | null = null;
+    let newsEnvelope: DataEnvelope<NewsItem[]> | null = null;
+    const floorsheetEnvelopes: Array<{
+      date: string;
+      envelope: DataEnvelope<FloorsheetTrade[]>;
+    }> = [];
+    const brokerFlowEnvelopes: Array<{
+      date: string;
+      envelope: DataEnvelope<BrokerFlow[]>;
+    }> = [];
     const equityEnvelopes: Array<{
       symbol: string;
       envelope: DataEnvelope<Candle[]>;
@@ -255,6 +297,70 @@ export async function syncPersonalData(
       warnings.push(`sector performance unavailable: ${message(error)}`);
     }
 
+    // Fundamentals, corporate actions, IPOs, news, floorsheet and the broker
+    // aggregates derived from it. All are optional; a missing file is skipped.
+    if (options.dataDir) {
+      for (const symbol of fundamentalSymbols(options.dataDir)) {
+        try {
+          const [latest, history] = await Promise.all([
+            service.getFundamentals(symbol),
+            service.getFundamentalsHistory(symbol),
+          ]);
+          fundamentalEnvelopes.push({ symbol, latest, history });
+          fundamentals += 1;
+        } catch (error) {
+          if (error instanceof DataValidationError) throw error;
+          warnings.push(`fundamentals ${symbol} skipped: ${message(error)}`);
+        }
+      }
+      if (existsSync(join(options.dataDir, "corporate-actions.csv"))) {
+        for (const symbol of symbols) {
+          try {
+            const envelope = await service.getCorporateActions(symbol);
+            if (envelope.data.length > 0) {
+              corporateActionEnvelopes.push({ symbol, envelope });
+              corporateActions += envelope.data.length;
+            }
+          } catch (error) {
+            if (error instanceof DataValidationError) throw error;
+          }
+        }
+      }
+      for (const date of floorsheetDates(options.dataDir)) {
+        try {
+          const envelope = await service.getFloorsheet(date);
+          floorsheetEnvelopes.push({ date, envelope });
+          floorsheetTrades += envelope.data.length;
+        } catch (error) {
+          if (error instanceof DataValidationError) throw error;
+          warnings.push(`floorsheet ${date} skipped: ${message(error)}`);
+        }
+        try {
+          const flows = await service.getBrokerFlows(date);
+          brokerFlowEnvelopes.push({ date, envelope: flows });
+          brokerFlows += flows.data.length;
+        } catch (error) {
+          if (error instanceof DataValidationError) throw error;
+        }
+      }
+    }
+
+    try {
+      iposEnvelope = await service.getIpos();
+      ipos = iposEnvelope.data.length;
+    } catch (error) {
+      rethrowIfFatal(error);
+      warnings.push(`IPO pipeline unavailable: ${message(error)}`);
+    }
+
+    try {
+      newsEnvelope = await service.getNews();
+      news = newsEnvelope.data.length;
+    } catch (error) {
+      rethrowIfFatal(error);
+      warnings.push(`news unavailable: ${message(error)}`);
+    }
+
     if (gapTotal > 0) {
       warnings.push(
         `${gapTotal} possible trading-day gap${gapTotal === 1 ? "" : "s"} detected; ${gaps.length} message${gaps.length === 1 ? "" : "s"} retained (holidays unknown; nothing was filled)`,
@@ -292,6 +398,31 @@ export async function syncPersonalData(
           store.upsertSnapshot("sectorPerformance", "latest", sectorEnvelope);
           snapshotRows += 1;
         }
+        for (const entry of fundamentalEnvelopes) {
+          store.upsertSnapshot("fundamentals", entry.symbol, entry.latest);
+          store.upsertSnapshot("fundamentalsHistory", entry.symbol, entry.history);
+          snapshotRows += 2;
+        }
+        for (const entry of corporateActionEnvelopes) {
+          store.upsertSnapshot("corporateActions", entry.symbol, entry.envelope);
+          snapshotRows += 1;
+        }
+        if (iposEnvelope && iposEnvelope.data.length > 0) {
+          store.upsertSnapshot("ipos", "all", iposEnvelope);
+          snapshotRows += 1;
+        }
+        if (newsEnvelope && newsEnvelope.data.length > 0) {
+          store.upsertSnapshot("news", "latest", newsEnvelope);
+          snapshotRows += 1;
+        }
+        for (const entry of floorsheetEnvelopes) {
+          store.upsertSnapshot("floorsheet", entry.date, entry.envelope);
+          snapshotRows += 1;
+        }
+        for (const entry of brokerFlowEnvelopes) {
+          store.upsertSnapshot("brokerFlows", entry.date, entry.envelope);
+          snapshotRows += 1;
+        }
       });
 
       store.finishSync(
@@ -318,6 +449,12 @@ export async function syncPersonalData(
           candleRows,
           quotes: quoteRows,
           snapshots: snapshotRows,
+          fundamentals,
+          corporateActions,
+          ipos,
+          news,
+          floorsheetTrades,
+          brokerFlows,
           failedSymbols: failedSymbols.length,
           gaps: gapTotal,
         },
@@ -334,6 +471,12 @@ export async function syncPersonalData(
       candleRows,
       quotes: quoteRows,
       snapshots: snapshotRows,
+      fundamentals,
+      corporateActions,
+      ipos,
+      news,
+      floorsheetTrades,
+      brokerFlows,
       written: !dryRun,
       failedSymbols,
       warnings,

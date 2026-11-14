@@ -44,7 +44,8 @@ export const NORMALIZER_VERSION = "1.0.0";
 
 const OHLC_HEADER =
   "symbol,timeframe,timestamp,date,open,high,low,close,volume,turnover,trades,adjusted,adjustmentFactor";
-const COMPANY_HEADER = "id,symbol,name,sector,instrumentType,status";
+const COMPANY_HEADER =
+  "id,symbol,name,sector,instrumentType,status,email,website,regulatoryBody,listedAt,marketCap,sharesOutstanding,paidUpValue,totalPaidUpValue,operationDate,registrar,address,phone,profileSource,profileAsOf";
 const SECURITY_HEADER =
   "id,symbol,name,companyId,instrumentType,isPromoter,status";
 const INDEX_HEADER = "symbol,name,isSector";
@@ -753,12 +754,51 @@ export async function acquireNepseSource(
 
     const companyLines = [COMPANY_HEADER];
     const securityLines = [SECURITY_HEADER];
+    // Preserve previously acquired unofficial profile columns: the archive
+    // only knows the company master, and must not erase profile data.
+    const existingCompanies = new Map<string, Record<string, string>>();
+    const companiesFile = join(outputDir, "companies.csv");
+    if (existsSync(companiesFile)) {
+      try {
+        const rows = parse(readFileSync(companiesFile, "utf8"), {
+          columns: true,
+          skip_empty_lines: true,
+          bom: true,
+          relax_column_count: true,
+        }) as Array<Record<string, string>>;
+        for (const row of rows) {
+          const symbol = (row.symbol ?? "").toUpperCase();
+          if (symbol) existingCompanies.set(symbol, row);
+        }
+      } catch {
+        warnings.push(
+          "companies.csv could not be read; existing profile columns will be regenerated.",
+        );
+      }
+    }
+    const profileKeys = [
+      "email",
+      "website",
+      "regulatoryBody",
+      "listedAt",
+      "marketCap",
+      "sharesOutstanding",
+      "paidUpValue",
+      "totalPaidUpValue",
+      "operationDate",
+      "registrar",
+      "address",
+      "phone",
+      "profileSource",
+      "profileAsOf",
+    ] as const;
     for (const company of master) {
       const instrumentType =
         INSTRUMENT_TYPES[company.instrumentType] ??
         (company.instrumentType || "Unknown");
       const status = STATUSES[company.status] ?? "unknown";
       const sector = company.sector || "Unclassified";
+      const previous = existingCompanies.get(company.symbol.toUpperCase());
       companyLines.push(
         csvLine([
           company.symbol,
@@ -767,6 +807,7 @@ export async function acquireNepseSource(
           sector,
           instrumentType,
           status,
+          ...profileKeys.map((key) => previous?.[key] ?? ""),
         ]),
       );
       securityLines.push(

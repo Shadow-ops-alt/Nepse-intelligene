@@ -15,12 +15,13 @@
     "status": "tsx src/cli.ts status"
   },
   "dependencies": {
+    "@stock/analytics": "workspace:*",
     "@stock/core": "workspace:*",
     "@stock/providers": "workspace:*",
     "@stock/store": "workspace:*",
+    "cheerio": "^1.2.0",
     "commander": "^15.0.0",
-    "csv-parse": "^7.0.3",
-    "@stock/analytics": "workspace:*"
+    "csv-parse": "^7.0.3"
   },
   "devDependencies": {
     "vitest": "^5.1.0"

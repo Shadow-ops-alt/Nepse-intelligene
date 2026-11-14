@@ -20,6 +20,16 @@ export const CompanySchema = z.object({
   regulatoryBody: z.string().optional(),
   listedAt: TradingDateSchema.optional(),
   marketCap: z.number().nonnegative().optional(),
+  /** Unofficial public profile fields (ShareSansar/Merolagani). */
+  sharesOutstanding: z.number().nonnegative().optional(),
+  paidUpValue: z.number().nonnegative().optional(),
+  totalPaidUpValue: z.number().nonnegative().optional(),
+  operationDate: TradingDateSchema.optional(),
+  registrar: z.string().optional(),
+  address: z.string().optional(),
+  phone: z.string().optional(),
+  profileSource: z.string().optional(),
+  profileAsOf: IsoDateTimeSchema.optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
