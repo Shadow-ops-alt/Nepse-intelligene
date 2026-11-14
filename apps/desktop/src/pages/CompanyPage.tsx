@@ -13,10 +13,8 @@ import type {
   Candle,
   CandlesResponse,
   CompaniesResponse,
-  Company,
   CorporateActionsResponse,
   FundamentalsResponse,
-  MetricValue,
   NewsResponse,
 } from "../types";
 import {
@@ -36,8 +34,19 @@ import {
   Tabs,
   heatStyle,
 } from "../components/ui";
-import { PriceChart, type ChartMarker } from "../components/PriceChart";
+import {
+  PriceChart,
+  type Analysis,
+  type ChartMarker,
+  type Overlay,
+  type Study,
+} from "../components/PriceChart";
 import { Icon } from "../components/icons";
+import { CompanyDetail } from "../fundamentals/CompanyDetail";
+
+const COMPANY_OVERLAYS: Overlay[] = ["sma20", "sma50", "sma200"];
+const COMPANY_STUDIES: Study[] = ["volume", "rsi"];
+const COMPANY_ANALYSIS: Analysis[] = ["sr"];
 
 interface WatchlistResponse {
   symbols: string[];
@@ -149,6 +158,20 @@ export function CompanyPage({
 
   const unadjusted = !candles.some((candle) => candle.adjusted);
 
+  // Profile, fundamentals, dividends, events and floorsheet for this symbol.
+  const companyDetail = (
+    <CompanyDetail
+      symbol={symbol}
+      company={company}
+      companies={companies}
+      lastClose={last?.close ?? null}
+      lastCloseDate={last ? last.timestamp.slice(0, 10) : null}
+      fundamentals={fundamentalsState}
+      actions={actionsState}
+      news={newsState}
+    />
+  );
+
   return (
     <div className="stack">
       <div className="page-heading">
@@ -207,10 +230,13 @@ export function CompanyPage({
       </div>
 
       {candles.length === 0 ? (
-        <EmptyState title={`No price history stored for ${symbol}`}>
-          Add <code>ohlc/{symbol}.csv</code> inside the app’s data folder, then
-          use <strong>Data → Import</strong> to load it.
-        </EmptyState>
+        <>
+          <EmptyState title={`No price history stored for ${symbol}`}>
+            Add <code>ohlc/{symbol}.csv</code> inside the app’s data folder, then
+            use <strong>Data → Import</strong> to load it.
+          </EmptyState>
+          {companyDetail}
+        </>
       ) : (
         <>
           {provenance?.stale && (
@@ -280,6 +306,8 @@ export function CompanyPage({
             />
           </div>
 
+          {companyDetail}
+
           <div className="grid main-side">
             <Card
               title="Price"
@@ -306,9 +334,11 @@ export function CompanyPage({
                 candles={candles}
                 size="tall"
                 defaultRange="1Y"
-                defaultOverlays={["sma20", "sma50", "sma200"]}
-                defaultStudies={["volume", "rsi"]}
+                defaultOverlays={COMPANY_OVERLAYS}
+                defaultStudies={COMPANY_STUDIES}
+                defaultAnalysis={COMPANY_ANALYSIS}
                 markers={markers}
+                drawingKey={`equity:${symbol}`}
               />
             </Card>
 
@@ -394,14 +424,6 @@ export function CompanyPage({
             )}
           </Card>
 
-          <CompanyProfileCard company={company} />
-
-          <FundamentalsCard state={fundamentalsState} />
-
-          <CorporateActionsCard state={actionsState} />
-
-          <CompanyNewsCard state={newsState} />
-
           {companies.length > 0 && company && (
             <PeerStrip
               sector={company.sector}
@@ -422,239 +444,6 @@ export function CompanyPage({
         </>
       )}
     </div>
-  );
-}
-
-function CompanyProfileCard({ company }: { company: Company | undefined }) {
-  if (!company) return null;
-  const rows: Array<{ label: string; value: string }> = [
-    { label: "Shares outstanding", value: formatCompact(company.sharesOutstanding) },
-    { label: "Paid-up value", value: formatNumber(company.paidUpValue) },
-    { label: "Total paid-up", value: formatCompact(company.totalPaidUpValue) },
-    { label: "Market cap", value: formatCompact(company.marketCap) },
-    { label: "Listed", value: company.listedAt ?? "—" },
-    { label: "In operation since", value: company.operationDate ?? "—" },
-    { label: "Registrar", value: company.registrar ?? "—" },
-    { label: "Address", value: company.address ?? "—" },
-    { label: "Phone", value: company.phone ?? "—" },
-    { label: "Email", value: company.email ?? "—" },
-    { label: "Website", value: company.website ?? "—" },
-  ];
-  return (
-    <Card
-      title="Company profile"
-      subtitle="Public profile fields as displayed by ShareSansar and Merolagani"
-      action={<Badge tone="warn">unofficial</Badge>}
-      footer={
-        company.profileAsOf
-          ? `Fetched ${company.profileAsOf.slice(0, 16).replace("T", " ")} · source ${company.profileSource ?? "public web"}`
-          : undefined
-      }
-    >
-      <div className="kv">
-        {rows.map((row) => (
-          <div key={row.label}>
-            <span>{row.label}</span>
-            <strong>{row.value}</strong>
-          </div>
-        ))}
-      </div>
-    </Card>
-  );
-}
-
-const METRIC_LABELS: Record<string, string> = {
-  eps: "EPS",
-  peRatio: "P/E",
-  bookValue: "Book value",
-  pbv: "P/B",
-  marketCap: "Market cap",
-  sharesOutstanding: "Shares",
-  marketPrice: "Market price",
-  dividend: "Dividend",
-  bonus: "Bonus",
-  nav: "NAV",
-  navDaily: "NAV (daily)",
-  navWeekly: "NAV (weekly)",
-  navMonthly: "NAV (monthly)",
-  close: "Close",
-  fundSize: "Fund size",
-  premiumDiscountPercent: "Premium / discount",
-};
-
-function formatMetric(metric: MetricValue | undefined): string {
-  if (!metric || metric.value === null || !Number.isFinite(metric.value)) return "—";
-  if (metric.unit === "currency") return `Rs ${formatNumber(metric.value)}`;
-  if (metric.unit === "percent") return `${formatNumber(metric.value)}%`;
-  if (metric.unit === "shares") return formatCompact(metric.value);
-  return formatNumber(metric.value);
-}
-
-const CORE_METRICS = ["eps", "peRatio", "bookValue", "pbv", "dividend", "bonus"];
-
-function FundamentalsCard({
-  state,
-}: {
-  state: ReturnType<typeof useApi<FundamentalsResponse>>;
-}) {
-  const latest = state.data?.latest ?? null;
-  const history = state.data?.history ?? [];
-  return (
-    <Card
-      title="Key ratios & fundamentals"
-      subtitle={
-        latest
-          ? `${latest.period}${latest.quarter ? ` · quarter ${latest.quarter}` : ""} · as displayed`
-          : "Latest displayed key ratios"
-      }
-      action={<Badge tone="warn">unofficial</Badge>}
-      footer="Only periods the public pages display. This is not an audited fundamentals history and is never used to fill missing prices."
-    >
-      {state.loading ? (
-        <Spinner label="Loading fundamentals" />
-      ) : !latest ? (
-        <EmptyState title="No fundamentals stored for this symbol">
-          Run <code>pnpm personal:details</code> to fetch public profiles and key
-          ratios, then import.
-        </EmptyState>
-      ) : (
-        <div className="stack">
-          <MiniStats
-            items={CORE_METRICS.map((key) => ({
-              label: METRIC_LABELS[key] ?? key,
-              value: formatMetric(latest.metrics[key]),
-            }))}
-          />
-          {history.length > 1 && (
-            <div className="table-scroll short">
-              <table className="table">
-                <thead>
-                  <tr>
-                    <th>Period</th>
-                    {CORE_METRICS.map((key) => (
-                      <th key={key} className="right">
-                        {METRIC_LABELS[key] ?? key}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...history]
-                    .sort((a, b) => b.period.localeCompare(a.period))
-                    .map((snapshot) => (
-                      <tr key={snapshot.period}>
-                        <td>
-                          <strong>{snapshot.period}</strong>
-                        </td>
-                        {CORE_METRICS.map((key) => (
-                          <td key={key} className="right">
-                            {formatMetric(snapshot.metrics[key])}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function CorporateActionsCard({
-  state,
-}: {
-  state: ReturnType<typeof useApi<CorporateActionsResponse>>;
-}) {
-  const actions = state.data?.actions ?? [];
-  return (
-    <Card
-      title="Corporate actions"
-      subtitle="Dividend, bonus and right history as displayed by Merolagani"
-      action={<Badge tone="warn">unofficial</Badge>}
-      footer="Percentages are of paid-up value. No adjustment is applied to stored prices; long-window indicators can still show artificial drops."
-    >
-      {state.loading ? (
-        <Spinner label="Loading corporate actions" />
-      ) : actions.length === 0 ? (
-        <EmptyState title="No corporate actions stored for this symbol" />
-      ) : (
-        <div className="table-scroll short">
-          <table className="table">
-            <thead>
-              <tr>
-                <th>Type</th>
-                <th className="right">Value</th>
-                <th>Fiscal year</th>
-                <th>Notes</th>
-              </tr>
-            </thead>
-            <tbody>
-              {actions.map((action, index) => {
-                const fiscalYear =
-                  action.notes?.match(/FY\s*([0-9]{3}\s*[-/]\s*[0-9]{3})/i)?.[1] ??
-                  "—";
-                return (
-                  <tr key={`${action.type}-${fiscalYear}-${index}`}>
-                    <td>
-                      <strong>{action.type}</strong>
-                    </td>
-                    <td className="right">
-                      {action.ratio ??
-                        (action.value === undefined
-                          ? "—"
-                          : action.currency === "NPR"
-                            ? `Rs ${formatNumber(action.value)}`
-                            : `${formatNumber(action.value)}%`)}
-                    </td>
-                    <td className="muted">{fiscalYear.replace(/\s+/g, "")}</td>
-                    <td className="muted small">{action.notes ?? ""}</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Card>
-  );
-}
-
-function CompanyNewsCard({
-  state,
-}: {
-  state: ReturnType<typeof useApi<NewsResponse>>;
-}) {
-  const news = (state.data?.news ?? []).slice(0, 8);
-  return (
-    <Card
-      title="Latest market news"
-      subtitle="Headlines from ShareSansar and Merolagani"
-      action={<Badge tone="warn">unofficial</Badge>}
-      footer="Market-wide headlines, not a symbol-specific feed. Titles link to the original publisher."
-    >
-      {state.loading ? (
-        <Spinner label="Loading news" />
-      ) : news.length === 0 ? (
-        <EmptyState title="No news stored" />
-      ) : (
-        <ul className="news-list">
-          {news.map((item) => (
-            <li key={item.id}>
-              <a href={item.url} target="_blank" rel="noreferrer">
-                {item.title}
-              </a>
-              <span className="muted small">
-                {" "}
-                · {item.source} · {item.publishedAt.slice(0, 16).replace("T", " ")}
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
-    </Card>
   );
 }
 
