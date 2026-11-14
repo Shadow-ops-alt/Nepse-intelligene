@@ -552,3 +552,314 @@ export function parseNews(html: string): ShareSansarNewsItem[] {
   });
   return items;
 }
+
+/* ------------------------------------------------------------------ */
+/* Company detail tabs (quarterly statements and event tables)         */
+/* ------------------------------------------------------------------ */
+
+export interface ShareSansarCompanyIdentity {
+  companyId?: string;
+  symbol?: string;
+  sector?: string;
+  csrfToken?: string;
+}
+
+/** Read the hidden identifiers and CSRF token a company page embeds. */
+export function parseCompanyIdentity(html: string): ShareSansarCompanyIdentity {
+  const $ = load(html);
+  const hidden = (id: string): string | undefined => {
+    const value = clean($(`#${id}`).first().text());
+    return value || undefined;
+  };
+  const token = clean($('meta[name="_token"]').first().attr("content") ?? "");
+  return {
+    ...(hidden("companyid") ? { companyId: hidden("companyid")! } : {}),
+    ...(hidden("symbol") ? { symbol: hidden("symbol")!.toUpperCase() } : {}),
+    ...(hidden("sector") ? { sector: hidden("sector")! } : {}),
+    ...(token ? { csrfToken: token } : {}),
+  };
+}
+
+export interface FinancialStatementRow {
+  /** The label exactly as the source displays it. */
+  label: string;
+  /** Parsed numeric value; undefined when the cell is a dash/blank. */
+  value?: number;
+  /** The raw cell text, preserved for audit. */
+  raw: string;
+}
+
+export interface ShareSansarQuarterlyReport {
+  period?: string;
+  fiscalYear?: string;
+  quarter?: number;
+  balanceSheet: FinancialStatementRow[];
+  profitLoss: FinancialStatementRow[];
+  keyMetrics: FinancialStatementRow[];
+  sourceUrl: string;
+}
+
+function statementRows(
+  $: CheerioAPI,
+  selector: string,
+): FinancialStatementRow[] {
+  const rows: FinancialStatementRow[] = [];
+  $(`${selector} table tbody tr`).each((_, row) => {
+    const cells = $(row).find("td");
+    if (cells.length < 2) return;
+    const label = clean(cells.eq(0).text());
+    const raw = clean(cells.eq(1).text());
+    if (!label || /^no data available$/i.test(label)) return;
+    const value = numberFrom(raw);
+    rows.push({
+      label,
+      raw,
+      ...(value !== undefined ? { value } : {}),
+    });
+  });
+  return rows;
+}
+
+function periodDetails(period: string | undefined): {
+  fiscalYear?: string;
+  quarter?: number;
+} {
+  if (!period) return {};
+  const fy = period.match(/([0-9]{3}\s*[/-]\s*[0-9]{3})/);
+  const quarter = period.match(/(1st|2nd|3rd|4th)\s+quarter/i);
+  return {
+    ...(fy?.[1] ? { fiscalYear: fy[1].replace(/\s+/g, "") } : {}),
+    ...(quarter?.[1]
+      ? { quarter: ["1st", "2nd", "3rd", "4th"].indexOf(quarter[1].toLowerCase()) + 1 }
+      : {}),
+  };
+}
+
+export function parseQuarterlyReport(
+  html: string,
+  sourceUrl: string,
+): ShareSansarQuarterlyReport {
+  const $ = load(html);
+  const period = clean(
+    $("#balance table thead th").eq(1).text() ||
+      $("#keymetrics table thead th").eq(1).text() ||
+      $("#profitloss table thead th").eq(1).text(),
+  );
+  const details = periodDetails(period || undefined);
+  return {
+    ...(period ? { period } : {}),
+    ...(details.fiscalYear ? { fiscalYear: details.fiscalYear } : {}),
+    ...(details.quarter !== undefined ? { quarter: details.quarter } : {}),
+    balanceSheet: statementRows($, "#balance"),
+    profitLoss: statementRows($, "#profitloss"),
+    keyMetrics: statementRows($, "#keymetrics"),
+    sourceUrl,
+  };
+}
+
+/** A normalised row from one of the company-page DataTables endpoints. */
+export interface ShareSansarCompanyEvent {
+  type: "dividend" | "agm" | "rightShare" | "announcement" | "companyNews";
+  /** Best available event date in ISO form (announcement/meeting/opening). */
+  date?: string;
+  fiscalYear?: string;
+  title: string;
+  detail?: string;
+  url?: string;
+  /** Raw source fields, retained for audit and future display. */
+  fields: Record<string, string>;
+}
+
+export interface DataTablesPage {
+  rows: Array<Record<string, unknown>>;
+  recordsTotal?: number;
+  recordsFiltered?: number;
+  draw?: number;
+}
+
+/** Parse a DataTables server-side JSON response without guessing fields. */
+export function parseDataTablesJson(json: string): DataTablesPage {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(json);
+  } catch {
+    return { rows: [] };
+  }
+  if (!parsed || typeof parsed !== "object") return { rows: [] };
+  const record = parsed as Record<string, unknown>;
+  const rows = Array.isArray(record.data)
+    ? record.data.filter(
+        (row): row is Record<string, unknown> =>
+          Boolean(row) && typeof row === "object",
+      )
+    : [];
+  return {
+    rows,
+    ...(Number.isFinite(Number(record.recordsTotal))
+      ? { recordsTotal: Number(record.recordsTotal) }
+      : {}),
+    ...(Number.isFinite(Number(record.recordsFiltered))
+      ? { recordsFiltered: Number(record.recordsFiltered) }
+      : {}),
+    ...(Number.isFinite(Number(record.draw))
+      ? { draw: Number(record.draw) }
+      : {}),
+  };
+}
+
+function stripMarkup(value: string): string {
+  return clean(value.replace(/<[^>]*>/g, " "));
+}
+
+function hrefIn(value: string): string | undefined {
+  const match = value.match(/href\s*=\s*["']([^"']+)["']/i);
+  return match?.[1] ? absoluteUrl(match[1]) : undefined;
+}
+
+function dateCell(value: unknown): string | undefined {
+  const text = clean(String(value ?? ""));
+  if (!text || /coming soon|not available|n\/a/i.test(text)) return undefined;
+  return dateFrom(text);
+}
+
+function textField(row: Record<string, unknown>, key: string): string | undefined {
+  const value = row[key];
+  if (value === null || value === undefined) return undefined;
+  const text = stripMarkup(String(value));
+  return text || undefined;
+}
+
+function rawFields(row: Record<string, unknown>): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const [key, value] of Object.entries(row)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === "object") continue;
+    const text = stripMarkup(String(value));
+    if (text) fields[key] = text;
+  }
+  return fields;
+}
+
+export function parseDividendRows(
+  rows: Array<Record<string, unknown>>,
+): ShareSansarCompanyEvent[] {
+  const events: ShareSansarCompanyEvent[] = [];
+  for (const row of rows) {
+    const bonus = numberFrom(textField(row, "bonus_share"));
+    const cash = numberFrom(textField(row, "cash_dividend"));
+    const total = numberFrom(textField(row, "total_dividend"));
+    const fiscalYear = textField(row, "year");
+    const announced = dateCell(row.announcement_date);
+    if (bonus === undefined && cash === undefined && total === undefined) continue;
+    const parts = [
+      cash !== undefined ? `Cash ${cash}%` : null,
+      bonus !== undefined ? `Bonus ${bonus}%` : null,
+      total !== undefined ? `Total ${total}%` : null,
+    ].filter(Boolean);
+    const detail = [
+      textField(row, "bookclose_date")
+        ? `Book closure: ${textField(row, "bookclose_date")}`
+        : null,
+      textField(row, "distribution_date")
+        ? `Distribution: ${textField(row, "distribution_date")}`
+        : null,
+      textField(row, "bonus_listing_date")
+        ? `Bonus listing: ${textField(row, "bonus_listing_date")}`
+        : null,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    events.push({
+      type: "dividend",
+      ...(announced ? { date: announced } : {}),
+      ...(fiscalYear ? { fiscalYear } : {}),
+      title: parts.length > 0 ? parts.join(" + ") : "Dividend announcement",
+      ...(detail ? { detail } : {}),
+      fields: rawFields(row),
+    });
+  }
+  return events;
+}
+
+export function parseAgmRows(
+  rows: Array<Record<string, unknown>>,
+): ShareSansarCompanyEvent[] {
+  const events: ShareSansarCompanyEvent[] = [];
+  for (const row of rows) {
+    const meeting = dateCell(row.meeting_date);
+    const title = textField(row, "agm") ?? "AGM";
+    const detail = [
+      textField(row, "venue_time"),
+      dateCell(row.bookclose_date)
+        ? `Book closure: ${dateCell(row.bookclose_date)}`
+        : null,
+      textField(row, "agenda"),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    events.push({
+      type: "agm",
+      ...(meeting ? { date: meeting } : {}),
+      title,
+      ...(detail ? { detail } : {}),
+      fields: rawFields(row),
+    });
+  }
+  return events;
+}
+
+export function parseRightShareRows(
+  rows: Array<Record<string, unknown>>,
+): ShareSansarCompanyEvent[] {
+  const events: ShareSansarCompanyEvent[] = [];
+  for (const row of rows) {
+    const ratio = textField(row, "ratio_value");
+    const units = textField(row, "total_units");
+    const price = textField(row, "issue_price");
+    const opening = dateCell(row.opening_date);
+    if (!ratio && !units && !price) continue;
+    const parts = [
+      ratio ? `Ratio ${ratio}` : null,
+      units ? `${units} units` : null,
+      price ? `@ NPR ${price}` : null,
+    ].filter(Boolean);
+    const detail = [
+      dateCell(row.opening_date) ? `Opening: ${dateCell(row.opening_date)}` : null,
+      dateCell(row.closing_date) ? `Closing: ${dateCell(row.closing_date)}` : null,
+      dateCell(row.final_date) ? `Book closure: ${dateCell(row.final_date)}` : null,
+      textField(row, "issue_manager"),
+    ]
+      .filter(Boolean)
+      .join(" · ");
+    events.push({
+      type: "rightShare",
+      ...(opening ? { date: opening } : {}),
+      title: parts.length > 0 ? parts.join(" · ") : "Right share",
+      ...(detail ? { detail } : {}),
+      fields: rawFields(row),
+    });
+  }
+  return events;
+}
+
+export function parseArticleRows(
+  rows: Array<Record<string, unknown>>,
+  type: "announcement" | "companyNews",
+): ShareSansarCompanyEvent[] {
+  const events: ShareSansarCompanyEvent[] = [];
+  for (const row of rows) {
+    const rawTitle = String(row.title ?? "");
+    const title = stripMarkup(rawTitle);
+    if (!title) continue;
+    const published = dateCell(row.published_date);
+    events.push({
+      type,
+      ...(published ? { date: published } : {}),
+      title,
+      ...(hrefIn(rawTitle) ? { url: hrefIn(rawTitle)! } : {}),
+      fields: rawFields(row),
+    });
+  }
+  return events;
+}
+

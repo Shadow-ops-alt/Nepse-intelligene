@@ -6,6 +6,15 @@ import { readCsv, writeCsv, type CsvRow } from "./csv";
 import {
   SHARESANSAR_BASE,
   parseCompanyProfile as parseShareSansarProfile,
+  parseCompanyIdentity,
+  parseQuarterlyReport,
+  parseDataTablesJson,
+  parseDividendRows,
+  parseAgmRows,
+  parseRightShareRows,
+  parseArticleRows,
+  type ShareSansarCompanyEvent,
+  type ShareSansarQuarterlyReport,
 } from "./sharesansar";
 import {
   MEROLAGANI_BASE,
@@ -66,6 +75,26 @@ export const CORPORATE_ACTION_HEADER = [
   "notes",
 ] as const;
 
+/**
+ * Company-specific events and disclosures. These are kept in their own file
+ * because they are not corporate actions (an announcement is not a dividend)
+ * and they are not market-wide news. The schema is deliberately generic so a
+ * new source category can be added without changing the provider interface.
+ */
+export const COMPANY_EVENT_HEADER = [
+  "symbol",
+  "type",
+  "date",
+  "fiscalYear",
+  "title",
+  "detail",
+  "url",
+  "source",
+  "classification",
+  "notes",
+  "fetchedAt",
+] as const;
+
 export interface CompanyDetailsOptions {
   dataDir: string;
   symbols?: string[];
@@ -74,6 +103,8 @@ export interface CompanyDetailsOptions {
   force?: boolean;
   maxAgeMinutes?: number;
   now?: Date;
+  /** Also fetch quarterly statements and company event tabs. Default true. */
+  statements?: boolean;
   onProgress?: (message: string) => void;
 }
 
@@ -96,6 +127,9 @@ export interface CompanyDetailsResult {
   fetched: number;
   companiesWithProfile: number;
   fundamentalsFiles: number;
+  statementFiles: number;
+  statementRows: number;
+  companyEventRows: number;
   corporateActionRows: number;
   conflicts: DetailsConflict[];
   failures: DetailsFailure[];
@@ -103,6 +137,7 @@ export interface CompanyDetailsResult {
   reportPath: string;
   companyFile: string;
   corporateActionsFile: string;
+  companyEventsFile: string;
 }
 
 interface MergedProfile {
@@ -376,6 +411,404 @@ function actionKey(
   return `${symbol}|${type}|${fiscalYear ?? ""}|${value}`;
 }
 
+function metricSlug(label: string): string {
+  return label
+    .toLowerCase()
+    .replace(/\([^)]*\)/g, " ")
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80);
+}
+
+const KEY_METRIC_ALIASES: Array<[RegExp, string]> = [
+  [/basic earnings per share/i, "eps"],
+  [/diluted earnings per share/i, "dilutedEps"],
+  [/non-performing loan/i, "npl"],
+  [/net worth per share/i, "netWorthPerShare"],
+  [/^p\/e ratio/i, "peRatio"],
+  [/price to book/i, "pbv"],
+  [/return on equity/i, "roe"],
+  [/return on assets/i, "roa"],
+  [/no\.? of outstanding shares/i, "sharesOutstanding"],
+  [/total shareholder'?s equity/i, "totalEquity"],
+];
+
+function keyMetricUnit(
+  label: string,
+): { unit: string; notes: string } {
+  if (/earnings per share|net worth per share/i.test(label)) {
+    return { unit: "currency", notes: "NPR per share." };
+  }
+  if (/p\/e|price to book|ratio/i.test(label)) {
+    return { unit: "ratio", notes: "" };
+  }
+  if (/outstanding shares|no\. of shares/i.test(label)) {
+    return { unit: "shares", notes: "" };
+  }
+  if (/in rs/i.test(label)) {
+    return { unit: "currency", notes: "Amount in Rs. '000 as displayed." };
+  }
+  return { unit: "percent", notes: "Percent as displayed." };
+}
+
+/**
+ * Persist the quarterly statement tabs as prefixed fundamental metrics. The
+ * prefixes keep balance-sheet, profit-and-loss and key-metric rows distinct
+ * even when the source uses the same label in more than one table.
+ */
+function writeStatementFundamentals(
+  dataDir: string,
+  symbol: string,
+  report: ShareSansarQuarterlyReport,
+  reportedAt: string,
+): { rows: number; period?: string } {
+  const period =
+    report.period ||
+    (report.fiscalYear
+      ? `FY${report.fiscalYear}${report.quarter ? ` Q${report.quarter}` : ""}`
+      : `statement-${reportedAt.slice(0, 10)}`);
+  const rows: string[][] = [];
+  const used = new Set<string>();
+  const add = (
+    prefix: "bs" | "pl" | "km",
+    statement: ShareSansarQuarterlyReport["balanceSheet"],
+    sectionNote: string,
+    includeAlias: boolean,
+  ): void => {
+    for (const entry of statement) {
+      if (entry.value === undefined) continue;
+      let metric = `${prefix}.${metricSlug(entry.label)}`;
+      if (!metric.split(".")[1]) metric = `${prefix}.unlabelled`;
+      let suffix = 2;
+      while (used.has(metric)) {
+        metric = `${prefix}.${metricSlug(entry.label)}_${suffix}`;
+        suffix += 1;
+      }
+      used.add(metric);
+      const unit =
+        prefix === "km"
+          ? keyMetricUnit(entry.label)
+          : {
+              unit: "currency",
+              notes: "Amount in Rs. '000 as displayed in the unaudited quarterly statement.",
+            };
+      rows.push([
+        period,
+        metric,
+        String(entry.value),
+        unit.unit,
+        "NPR",
+        report.fiscalYear ?? "",
+        report.quarter === undefined ? "" : String(report.quarter),
+        reportedAt.slice(0, 10),
+        "sharesansar",
+        "unverified",
+        [entry.label, unit.notes, sectionNote].filter(Boolean).join(" · "),
+      ]);
+      if (prefix === "km" && includeAlias) {
+        for (const [pattern, alias] of KEY_METRIC_ALIASES) {
+          if (!pattern.test(entry.label)) continue;
+          const aliasMetric = `statement.${alias}`;
+          if (used.has(aliasMetric)) continue;
+          used.add(aliasMetric);
+          rows.push([
+            period,
+            aliasMetric,
+            String(entry.value),
+            unit.unit,
+            "NPR",
+            report.fiscalYear ?? "",
+            report.quarter === undefined ? "" : String(report.quarter),
+            reportedAt.slice(0, 10),
+            "sharesansar",
+            "unverified",
+            `${entry.label} (canonical alias of km.${metricSlug(entry.label)})`,
+          ]);
+          break;
+        }
+      }
+    }
+  };
+  add("bs", report.balanceSheet, "Balance sheet as displayed by ShareSansar.", true);
+  add("pl", report.profitLoss, "Profit and loss account as displayed by ShareSansar.", true);
+  add("km", report.keyMetrics, "Key metrics as displayed by ShareSansar.", true);
+  if (rows.length === 0) return { rows: 0 };
+
+  const file = join(dataDir, "fundamentals", `${symbol}.csv`);
+  const existing = readCsv(file);
+  const merged = new Map<string, string[]>();
+  for (const row of existing) {
+    const key = `${row.period ?? ""}|${row.metric ?? ""}`;
+    if (!key.startsWith("|")) {
+      merged.set(key, FUNDAMENTALS_HEADER.map((header) => row[header] ?? ""));
+    }
+  }
+  for (const row of rows) merged.set(`${row[0]}|${row[1]}`, row);
+  writeCsv(file, [...FUNDAMENTALS_HEADER], [...merged.values()]);
+  return { rows: rows.length, period };
+}
+
+function buildCompanyEventRows(
+  events: ShareSansarCompanyEvent[],
+  symbol: string,
+  source: string,
+  fetchedAt: string,
+): Array<{ key: string; row: string[] }> {
+  return events.map((event) => {
+    const date = event.date ?? "";
+    const key = [
+      symbol,
+      event.type,
+      date,
+      event.fiscalYear ?? "",
+      event.title.toLowerCase(),
+    ].join("|");
+    return {
+      key,
+      row: [
+        symbol,
+        event.type,
+        date,
+        event.fiscalYear ?? "",
+        event.title,
+        event.detail ?? "",
+        event.url ?? "",
+        source,
+        "UNVERIFIED",
+        Object.entries(event.fields)
+          .map(([name, value]) => `${name}=${value}`)
+          .join("; "),
+        fetchedAt,
+      ],
+    };
+  });
+}
+
+
+interface SupplementalResult {
+  report: { report: ShareSansarQuarterlyReport; fetchedAt: string } | null;
+  events: Array<{ event: ShareSansarCompanyEvent; fetchedAt: string }>;
+  failures: Array<{ symbol: string; source: "sharesansar"; error: string }>;
+}
+
+function dataTableFields(
+  companyId: string,
+  columns: string[],
+  extra: Record<string, string> = {},
+): Record<string, string> {
+  const fields: Record<string, string> = {
+    draw: "1",
+    start: "0",
+    length: "-1",
+    "search[value]": "",
+    "search[regex]": "false",
+    company: companyId,
+    ...extra,
+  };
+  for (const [index, data] of columns.entries()) {
+    fields[`columns[${index}][data]`] = data;
+  }
+  return fields;
+}
+
+const DIVIDEND_COLUMNS = [
+  "DT_Row_Index",
+  "bonus_share",
+  "cash_dividend",
+  "total_dividend",
+  "announcement_date",
+  "bookclose_date",
+  "distribution_date",
+  "bonus_listing_date",
+  "year",
+];
+const AGM_COLUMNS = [
+  "DT_Row_Index",
+  "agm",
+  "venue_time",
+  "bookclose_date",
+  "meeting_date",
+  "agenda",
+];
+const RIGHT_COLUMNS = [
+  "DT_Row_Index",
+  "ratio_value",
+  "total_units",
+  "issue_price",
+  "opening_date",
+  "closing_date",
+  "final_date",
+  "listing_date",
+  "issue_manager",
+  "status",
+  "view",
+];
+const ARTICLE_COLUMNS = ["published_date", "title"];
+
+async function fetchCompanyTabs(
+  client: WebClient,
+  symbol: string,
+  pageUrl: string,
+  html: string,
+): Promise<SupplementalResult> {
+  const identity = parseCompanyIdentity(html);
+  const result: SupplementalResult = {
+    report: null,
+    events: [],
+    failures: [],
+  };
+  if (!identity.companyId || !identity.csrfToken) {
+    result.failures.push({
+      symbol,
+      source: "sharesansar",
+      error:
+        "company page did not expose the hidden company id / CSRF token needed for detail tabs",
+    });
+    return result;
+  }
+
+  const headers = {
+    "x-csrf-token": identity.csrfToken,
+    "x-requested-with": "XMLHttpRequest",
+    origin: SHARESANSAR_BASE,
+    referer: pageUrl,
+  };
+
+  const call = async (
+    label: string,
+    endpoint: string,
+    fields: Record<string, string>,
+  ): Promise<string | null> => {
+    try {
+      const response = await client.postForm(
+        `${SHARESANSAR_BASE}/${endpoint}`,
+        fields,
+        headers,
+      );
+      const text = response.text.trim();
+      if (/"message"\s*:\s*"CSRF token mismatch/i.test(text)) {
+        throw new Error("CSRF token was rejected");
+      }
+      return text;
+    } catch (error) {
+      result.failures.push({
+        symbol,
+        source: "sharesansar",
+        error: `${label}: ${error instanceof Error ? error.message : String(error)}`,
+      });
+      return null;
+    }
+  };
+
+  const event = (
+    label: string,
+    text: string | null,
+    parse: (rows: Array<Record<string, unknown>>) => ShareSansarCompanyEvent[],
+    fetchedAt: string,
+  ): void => {
+    if (!text) return;
+    const page = parseDataTablesJson(text);
+    if (page.rows.length === 0) {
+      if (page.recordsFiltered === undefined && !/^\s*\[/.test(text)) {
+        result.failures.push({
+          symbol,
+          source: "sharesansar",
+          error: `${label}: response was not a DataTables payload`,
+        });
+      }
+      return;
+    }
+    for (const parsed of parse(page.rows)) {
+      result.events.push({ event: parsed, fetchedAt });
+    }
+  };
+
+  const quarterly = await call(
+    "quarterly report",
+    "company-quarterly-report",
+    {
+      company: identity.companyId,
+      symbol: identity.symbol ?? symbol,
+      sector: identity.sector ?? "",
+    },
+  );
+  if (quarterly) {
+    const report = parseQuarterlyReport(quarterly, `${SHARESANSAR_BASE}/company/${symbol.toLowerCase()}`);
+    if (
+      report.balanceSheet.length > 0 ||
+      report.profitLoss.length > 0 ||
+      report.keyMetrics.length > 0
+    ) {
+      result.report = { report, fetchedAt: new Date().toISOString() };
+    } else {
+      result.failures.push({
+        symbol,
+        source: "sharesansar",
+        error: "quarterly report: no statement rows were returned",
+      });
+    }
+  }
+
+  const dividend = await call(
+    "dividend history",
+    "company-dividend",
+    dataTableFields(identity.companyId, DIVIDEND_COLUMNS),
+  );
+  event("dividend history", dividend, parseDividendRows, new Date().toISOString());
+
+  const agm = await call(
+    "AGM history",
+    "company-agm",
+    dataTableFields(identity.companyId, AGM_COLUMNS),
+  );
+  event("AGM history", agm, parseAgmRows, new Date().toISOString());
+
+  const right = await call(
+    "right share history",
+    "company-rightshare",
+    dataTableFields(identity.companyId, RIGHT_COLUMNS),
+  );
+  event("right share history", right, parseRightShareRows, new Date().toISOString());
+
+  const announcements = await call(
+    "announcements",
+    "company-announcements",
+    dataTableFields(identity.companyId, ARTICLE_COLUMNS),
+  );
+  event(
+    "announcements",
+    announcements,
+    (rows) => parseArticleRows(rows, "announcement"),
+    new Date().toISOString(),
+  );
+
+  const announcementCategory = await call(
+    "financial-report announcements",
+    "company-announcement-category",
+    dataTableFields(identity.companyId, ARTICLE_COLUMNS, { category: "11" }),
+  );
+  event(
+    "financial-report announcements",
+    announcementCategory,
+    (rows) => parseArticleRows(rows, "announcement"),
+    new Date().toISOString(),
+  );
+
+  const companyNews = await call(
+    "company news",
+    "company-news-category",
+    dataTableFields(identity.companyId, ARTICLE_COLUMNS, { category: "19" }),
+  );
+  event(
+    "company news",
+    companyNews,
+    (rows) => parseArticleRows(rows, "companyNews"),
+    new Date().toISOString(),
+  );
+
+  return result;
+}
+
 export async function acquireCompanyDetails(
   options: CompanyDetailsOptions,
 ): Promise<CompanyDetailsResult> {
@@ -439,6 +872,15 @@ export async function acquireCompanyDetails(
     string,
     { profile: MerolaganiCompanyProfile; fetchedAt: string }
   >();
+  const statementEntries = new Map<
+    string,
+    { report: ShareSansarQuarterlyReport; fetchedAt: string }
+  >();
+  const eventEntries: Array<{
+    symbol: string;
+    event: ShareSansarCompanyEvent;
+    fetchedAt: string;
+  }> = [];
   const actionsBySymbol = new Map<string, MerolaganiCorporateAction[]>();
   const latestClose = lastCloseBySymbol(dataDir);
 
@@ -486,6 +928,18 @@ export async function acquireCompanyDetails(
     if (!ssProfile && !mlProfile) {
       skipped.push(`${symbol}: both public pages were unavailable`);
       continue;
+    }
+
+    if (options.statements !== false && ssHtml) {
+      options.onProgress?.(`company details ${symbol}: statements and events`);
+      const supplemental = await fetchCompanyTabs(client, symbol, ssUrl, ssHtml);
+      failures.push(...supplemental.failures);
+      if (supplemental.report) {
+        statementEntries.set(symbol, supplemental.report);
+      }
+      for (const entry of supplemental.events) {
+        eventEntries.push({ symbol, ...entry });
+      }
     }
     if (ssHtml && ssProfile && !ssProfile.sharesOutstanding && !ssProfile.name) {
       skipped.push(`${symbol}: ShareSansar page did not contain a company profile`);
@@ -560,6 +1014,56 @@ export async function acquireCompanyDetails(
     const result = writeFundamentals(dataDir, symbol, entry.profile, entry.fetchedAt);
     if (result) fundamentalsFiles += 1;
   }
+
+  let statementFiles = 0;
+  let statementRows = 0;
+  for (const [symbol, entry] of statementEntries) {
+    const written = writeStatementFundamentals(
+      dataDir,
+      symbol,
+      entry.report,
+      entry.fetchedAt,
+    );
+    if (written.rows > 0) {
+      statementFiles += 1;
+      statementRows += written.rows;
+    }
+  }
+
+  // Company events: append only new keys. The full raw source row is kept in
+  // `notes`, so a later schema addition can be backfilled without re-fetching.
+  const eventsFile = join(dataDir, "company-events.csv");
+  const existingEventRows = readCsv(eventsFile);
+  const eventRows = new Map<string, string[]>();
+  for (const row of existingEventRows) {
+    const key = [
+      (row.symbol ?? "").toUpperCase(),
+      row.type ?? "",
+      row.date ?? "",
+      row.fiscalYear ?? "",
+      (row.title ?? "").toLowerCase(),
+    ].join("|");
+    eventRows.set(key, COMPANY_EVENT_HEADER.map((header) => row[header] ?? ""));
+  }
+  let companyEventRows = 0;
+  for (const entry of eventEntries) {
+    const rows = buildCompanyEventRows(
+      [entry.event],
+      entry.symbol,
+      "sharesansar",
+      entry.fetchedAt,
+    );
+    for (const item of rows) {
+      if (eventRows.has(item.key)) continue;
+      eventRows.set(item.key, item.row);
+      companyEventRows += 1;
+    }
+  }
+  writeCsv(
+    eventsFile,
+    [...COMPANY_EVENT_HEADER],
+    [...eventRows.values()],
+  );
 
   // Corporate actions: append only genuinely new keys. A changed value for an
   // existing key is reported, never overwritten silently.
@@ -657,6 +1161,9 @@ export async function acquireCompanyDetails(
     fetched,
     companiesWithProfile: mergedProfiles.size,
     fundamentalsFiles,
+    statementFiles,
+    statementRows,
+    companyEventRows,
     corporateActionRows,
     conflicts,
     failures,
@@ -669,7 +1176,7 @@ export async function acquireCompanyDetails(
       profileSource: profile.profileSource,
     })),
     note:
-      "Unofficial data. ShareSansar is the primary profile source; Merolagani supplies key ratios and dividend history. Disagreements are reported, not silently resolved.",
+      "Unofficial data. ShareSansar is the primary profile source; Merolagani supplies key ratios and dividend history. Quarterly statements and company events are stored as displayed. Disagreements are reported, not silently resolved.",
   };
   writeFileSync(reportPath, `${JSON.stringify(report, null, 2)}\n`, "utf8");
 
@@ -678,6 +1185,9 @@ export async function acquireCompanyDetails(
     fetched,
     companiesWithProfile: mergedProfiles.size,
     fundamentalsFiles,
+    statementFiles,
+    statementRows,
+    companyEventRows,
     corporateActionRows,
     conflicts,
     failures,
@@ -685,6 +1195,7 @@ export async function acquireCompanyDetails(
     reportPath,
     companyFile,
     corporateActionsFile: actionsFile,
+    companyEventsFile: eventsFile,
   };
 }
 

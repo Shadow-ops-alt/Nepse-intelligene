@@ -99,6 +99,12 @@ export class WebClient {
   private readonly now: () => Date;
   private readonly lastRequestAt = new Map<string, number>();
   private readonly manifest: Manifest;
+  /**
+   * In-memory cookie jar. Some public pages issue a short-lived session cookie
+   * before their AJAX tabs will answer. The jar is deliberately per-client and
+   * never persisted: a new acquisition run starts as a fresh anonymous visitor.
+   */
+  private readonly cookies = new Map<string, Map<string, string>>();
 
   constructor(options: WebClientOptions) {
     this.outputDir = options.outputDir;
@@ -199,6 +205,39 @@ export class WebClient {
     }
   }
 
+  private captureCookies(response: Response, host: string): void {
+    const setCookies =
+      typeof response.headers.getSetCookie === "function"
+        ? response.headers.getSetCookie()
+        : [];
+    if (setCookies.length === 0) return;
+    const jar = this.cookies.get(host) ?? new Map<string, string>();
+    for (const raw of setCookies) {
+      const pair = raw.split(";")[0] ?? "";
+      const separator = pair.indexOf("=");
+      if (separator <= 0) continue;
+      const name = pair.slice(0, separator).trim();
+      const value = pair.slice(separator + 1).trim();
+      if (!name) continue;
+      if (value === "" || /max-age=0/i.test(raw)) {
+        jar.delete(name);
+      } else {
+        jar.set(name, value);
+      }
+    }
+    if (jar.size > 0) {
+      this.cookies.set(host, jar);
+    } else {
+      this.cookies.delete(host);
+    }
+  }
+
+  private cookieHeader(host: string): string | undefined {
+    const jar = this.cookies.get(host);
+    if (!jar || jar.size === 0) return undefined;
+    return [...jar.entries()].map(([name, value]) => `${name}=${value}`).join("; ");
+  }
+
   /**
    * `headers` is used for endpoints that only return JSON when requested with
    * `X-Requested-With: XMLHttpRequest`. The cache key includes the header set so
@@ -229,9 +268,13 @@ export class WebClient {
             accept:
               "text/html,application/json;q=0.9,text/plain;q=0.8,*/*;q=0.5",
             "accept-language": "en-US,en;q=0.9,ne;q=0.8",
+            ...(this.cookieHeader(host)
+              ? { cookie: this.cookieHeader(host)! }
+              : {}),
             ...headers,
           },
         });
+        this.captureCookies(response, host);
         const retryable =
           response.status === 429 ||
           response.status === 408 ||
@@ -302,6 +345,7 @@ export class WebClient {
   async postForm(
     url: string,
     fields: Record<string, string>,
+    headers: Record<string, string> = {},
   ): Promise<FetchResult> {
     const host = hostOf(url);
     let lastError: unknown;
@@ -319,9 +363,14 @@ export class WebClient {
               "text/html,application/json;q=0.9,text/plain;q=0.8,*/*;q=0.5",
             "accept-language": "en-US,en;q=0.9,ne;q=0.8",
             "content-type": "application/x-www-form-urlencoded",
+            ...(this.cookieHeader(host)
+              ? { cookie: this.cookieHeader(host)! }
+              : {}),
+            ...headers,
           },
           body,
         });
+        this.captureCookies(response, host);
         const retryable =
           response.status === 429 ||
           response.status === 408 ||

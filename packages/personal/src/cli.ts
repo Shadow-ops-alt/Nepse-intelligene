@@ -211,6 +211,10 @@ program
   .option("--limit <count>", "maximum companies to fetch; 0 means all", "0")
   .option("--max-age-minutes <minutes>", "reuse a cached page younger than this", "720")
   .option("--force", "ignore the page cache and refetch every page")
+  .option(
+    "--no-statements",
+    "skip quarterly statements and company event tabs (faster, profiles only)",
+  )
   .action(async (options: Record<string, string | boolean | undefined>) => {
     const dataDir = resolve(
       invocationDir,
@@ -227,14 +231,16 @@ program
         limit: Number(options.limit ?? 0),
         force: options.force === true,
         maxAgeMinutes: Number(options.maxAgeMinutes ?? 720),
+        statements: options.statements !== false,
         onProgress: (line) => console.log(`  ${line}`),
       });
       console.log("");
       console.log(
-        `Profiles: ${result.companiesWithProfile}/${result.requested} companies; fundamentals files: ${result.fundamentalsFiles}; new corporate-action rows: ${result.corporateActionRows}.`,
+        `Profiles: ${result.companiesWithProfile}/${result.requested} companies; fundamentals files: ${result.fundamentalsFiles}; statement files: ${result.statementFiles} (${result.statementRows} rows); new company events: ${result.companyEventRows}; new corporate-action rows: ${result.corporateActionRows}.`,
       );
       console.log(`Companies:        ${result.companyFile}`);
       console.log(`Corporate actions: ${result.corporateActionsFile}`);
+      console.log(`Company events:   ${result.companyEventsFile}`);
       console.log(`Report:           ${result.reportPath}`);
       if (result.conflicts.length > 0) {
         console.log(`Conflicts reported: ${result.conflicts.length}`);
