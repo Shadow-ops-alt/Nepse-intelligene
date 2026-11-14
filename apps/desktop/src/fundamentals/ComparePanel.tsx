@@ -17,6 +17,7 @@ import {
   METRICS,
   bestIndex,
   calendarYearReturns,
+  companyEventsPath,
   fiveYearDividends,
   formatKind,
   mergeSnapshots,
@@ -29,6 +30,7 @@ import {
   storedLabel,
   type CanonicalKey,
   type CapClass,
+  type CompanyEventsResponse,
   type Direction,
   type DividendSummary,
   type MergedFundamentals,
@@ -150,6 +152,8 @@ export function ComparePanel({ universe }: { universe: DeskUniverse }) {
   const funds = useCachedApiMany<FundamentalsResponse>(fundPaths);
   const candles = useCachedApiMany<CandlesResponse>(candlePaths);
   const actions = useCachedApiMany<CorporateActionsResponse>(actionPaths);
+  const eventPaths = useMemo(() => selected.map(companyEventsPath), [selected]);
+  const events = useCachedApiMany<CompanyEventsResponse>(eventPaths);
 
   const entries = useMemo<Entry[]>(
     () =>
@@ -162,7 +166,7 @@ export function ComparePanel({ universe }: { universe: DeskUniverse }) {
         const close = universe.closes.get(symbol) ?? candleList.at(-1)?.close ?? null;
         const company = universe.companyBySymbol.get(symbol);
         const actionList = actions[index]?.data?.actions ?? [];
-        const dividends = fiveYearDividends(actionList);
+        const dividends = fiveYearDividends(actionList, events[index]?.data?.events ?? []);
         const r = ratios(merged, close);
         return {
           symbol,
@@ -182,10 +186,10 @@ export function ComparePanel({ universe }: { universe: DeskUniverse }) {
           actionState: actions[index],
         };
       }),
-    [selected, funds, candles, actions, universe],
+    [selected, funds, candles, actions, events, universe],
   );
 
-  const loading = [...funds, ...candles, ...actions].some((state) => state.loading);
+  const loading = [...funds, ...candles, ...actions, ...events].some((state) => state.loading);
 
   return (
     <div className="stack">
@@ -810,7 +814,7 @@ function DividendCard({ entries }: { entries: Entry[] }) {
     return [...byStart.entries()].sort((a, b) => b[0] - a[0]).slice(0, 5);
   }, [entries]);
   const provenance = firstProvenance(entries, (entry) => entry.actionState?.data?.provenance);
-  const anyActions = entries.some((entry) => entry.actions.length > 0);
+  const anyActions = entries.some((entry) => entry.actions.length > 0 || entry.dividends.years.length > 0);
   const avgYield = entries.map((entry) =>
     dividendYield(entry.dividends.cashAverage, entry.company?.paidUpValue, entry.close, "5-year average"),
   );
@@ -820,9 +824,9 @@ function DividendCard({ entries }: { entries: Entry[] }) {
   return (
     <Card
       title="Dividend history (5 fiscal years)"
-      subtitle="Cash % and bonus % of paid-up value as listed by Merolagani"
+      subtitle="Cash % and bonus % of paid-up value as listed by Merolagani, gaps filled from ShareSansar dividend announcements"
       action={<ProvenanceLine provenance={provenance} />}
-      footer="UNVERIFIED as displayed. A year the source does not list is shown as — and is not counted as zero; the scraper skips 0% rows, so — can mean “none declared” or “not listed”. Averages use only listed years. Yield on close is DERIVED: cash % × paid-up value per share ÷ last stored close."
+      footer="UNVERIFIED as displayed. Merolagani’s dividend history comes first; ShareSansar dividend announcements (company events) fill years or bonus figures it does not list, and a disagreement is marked ⚠ with the Merolagani value kept. A year neither page lists is shown as — and is not counted as zero (0% years are not listed). Averages use only listed years. Yield on close is DERIVED: cash % × paid-up value per share ÷ last stored close."
     >
       {!anyActions ? (
         <MissingData
@@ -862,6 +866,11 @@ function DividendCard({ entries }: { entries: Entry[] }) {
                             {year.cash !== null ? `${formatNumber(year.cash)}%` : "—"}
                             <span className="muted"> + </span>
                             {year.bonus !== null ? `${formatNumber(year.bonus)}% B` : "— B"}
+                            {year.conflict && (
+                              <span className="tone-down" title={`${year.conflict} (Merolagani value kept)`}>
+                                {" "}⚠
+                              </span>
+                            )}
                             {year.right && <span className="cell-sub">right {year.right}</span>}
                           </>
                         ) : (

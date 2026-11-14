@@ -35,6 +35,7 @@ import { AlertsPage } from "./pages/AlertsPage";
 import { LivePage } from "./pages/LivePage";
 import { CalculatorPage } from "./pages/CalculatorPage";
 import { SectorsPage } from "./pages/SectorsPage";
+import { FundamentalsPage } from "./pages/FundamentalsPage";
 import { FloorsheetPage } from "./pages/FloorsheetPage";
 import { EventsPage } from "./pages/EventsPage";
 import { useAlerts } from "./alerts";
@@ -100,6 +101,14 @@ const RESEARCH: NavItem[] = [
     crumb: "Technical, volume and risk screens computed from stored candles",
     icon: Icon.Screener,
     key: "4",
+  },
+  {
+    path: "/fundamentals",
+    label: "Fundamentals",
+    title: "Fundamental desk",
+    crumb: "EPS, P/E, P/B, ROE, ROA, NPL, dividends — screen, compare and sector medians",
+    icon: Icon.Sigma,
+    key: "5",
   },
   {
     path: "/sectors",
@@ -323,6 +332,8 @@ export function App() {
     content = <AlertsPage alerts={alerts} onOpenSymbol={openSymbol} />;
   } else if (page === "live") {
     content = <LivePage onOpenSymbol={openSymbol} />;
+  } else if (page === "fundamentals") {
+    content = <FundamentalsPage onOpenSymbol={openSymbol} />;
   } else if (page === "sectors") {
     content = <SectorsPage onOpenSymbol={openSymbol} />;
   } else if (page === "floorsheet") {

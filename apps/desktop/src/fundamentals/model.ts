@@ -118,6 +118,11 @@ export const METRICS: MetricDef[] = [
 
 export const METRIC_BY_KEY = new Map(METRICS.map((def) => [def.key, def]));
 
+/** One shared path per symbol so the events and dividends views share a fetch. */
+export function companyEventsPath(symbol: string): string {
+  return `/api/company-events?symbol=${encodeURIComponent(symbol)}&limit=1000`;
+}
+
 export function metricDef(key: CanonicalKey): MetricDef {
   return METRIC_BY_KEY.get(key)!;
 }
@@ -239,10 +244,19 @@ export function mergeSnapshots(
       if (reported && (!reportedAt || reported > reportedAt)) reportedAt = reported;
     }
   }
+  // The same period can arrive twice (latest + history); keep one per period.
+  const byPeriod = new Map<string, FundamentalsSnapshot>();
+  for (const snapshot of snapshots) {
+    const existing = byPeriod.get(snapshot.period);
+    byPeriod.set(
+      snapshot.period,
+      existing ? { ...existing, ...snapshot, metrics: { ...existing.metrics, ...snapshot.metrics } } : snapshot,
+    );
+  }
   return {
     symbol,
     values,
-    snapshots: sortSnapshots(snapshots),
+    snapshots: sortSnapshots([...byPeriod.values()]),
     reportedAt,
     sources: [...sources].sort(),
   };
@@ -449,7 +463,11 @@ export interface Ratios {
 
 /** Published ratios with clearly-labelled derived fallbacks. */
 export function ratios(merged: MergedFundamentals | null | undefined, close: number | null): Ratios {
-  const eps = published(pick(merged, "eps")) ?? NONE;
+  const epsStored = pick(merged, "eps");
+  const eps = published(epsStored) ?? NONE;
+  // Merolagani labels EPS with a quarter; a Q1–Q3 figure may be part-year.
+  const quarter = epsStored?.key === "eps" ? (epsStored.metric.quarter ?? 0) : 0;
+  const partYear = quarter >= 1 && quarter <= 3 ? ` (EPS labelled Q${quarter}; may be part-year)` : "";
   const bvps = published(pick(merged, "bookValue")) ?? NONE;
   const epsValue = eps.value;
   const bvpsValue = bvps.value;
@@ -458,7 +476,7 @@ export function ratios(merged: MergedFundamentals | null | undefined, close: num
   const pe =
     published(pick(merged, "peRatio")) ??
     (closeOk && epsValue !== null && epsValue > 0
-      ? derived(close / epsValue, "last close ÷ EPS")
+      ? derived(close / epsValue, `last close ÷ EPS${partYear}`)
       : { ...NONE, note: epsValue !== null && epsValue <= 0 ? "not meaningful (EPS ≤ 0)" : NONE.note });
   const pb =
     published(pick(merged, "pbv")) ??
@@ -468,11 +486,11 @@ export function ratios(merged: MergedFundamentals | null | undefined, close: num
   const roe =
     published(pick(merged, "roe")) ??
     (epsValue !== null && bvpsValue !== null && bvpsValue > 0
-      ? derived((epsValue / bvpsValue) * 100, "≈ EPS ÷ book value per share × 100")
+      ? derived((epsValue / bvpsValue) * 100, `≈ EPS ÷ book value per share × 100${partYear}`)
       : NONE);
   const earningsYield =
     closeOk && epsValue !== null
-      ? derived((epsValue / close) * 100, "EPS ÷ last close × 100")
+      ? derived((epsValue / close) * 100, `EPS ÷ last close × 100${partYear}`)
       : NONE;
   return {
     eps,
@@ -518,24 +536,78 @@ export interface DividendYear {
   cash: number | null;
   bonus: number | null;
   right: string | null;
+  /** Which public pages list this year (merolagani, sharesansar). */
+  sources: string[];
+  /** Set when the two pages disagree; the Merolagani value is kept. */
+  conflict: string | null;
 }
 
-/** Per fiscal year cash/bonus/right, newest first. */
-export function dividendYears(actions: CorporateAction[]): DividendYear[] {
+function percentIn(text: string, label: string): number | null {
+  const match = text.match(new RegExp(`${label}\\s*([\\d.]+)\\s*%`, "i"));
+  if (!match?.[1]) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+/**
+ * Per fiscal year cash/bonus/right, newest first. Merolagani corporate
+ * actions come first; ShareSansar dividend events (from company-events)
+ * fill years or bonus figures Merolagani does not list. A disagreement is
+ * reported, never averaged away.
+ */
+export function dividendYears(actions: CorporateAction[], events: CompanyEvent[] = []): DividendYear[] {
   const years = new Map<number, DividendYear>();
+  const entryFor = (start: number, fy: string | null): DividendYear => {
+    const existing = years.get(start);
+    if (existing) return existing;
+    const created: DividendYear = {
+      fiscalYear: fiscalYearLabel(fy) ?? String(start),
+      start,
+      cash: null,
+      bonus: null,
+      right: null,
+      sources: [],
+      conflict: null,
+    };
+    years.set(start, created);
+    return created;
+  };
   for (const action of actions) {
     const fy = actionFiscalYear(action);
     const start = fiscalYearStart(fy);
     if (start === null) continue;
-    const entry =
-      years.get(start) ??
-      ({ fiscalYear: fiscalYearLabel(fy) ?? String(start), start, cash: null, bonus: null, right: null } satisfies DividendYear);
+    const entry = entryFor(start, fy);
     const kind = actionKind(action.type);
     const percent = actionPercent(action);
     if (kind === "cash" && percent !== null) entry.cash = (entry.cash ?? 0) + percent;
     if (kind === "bonus" && percent !== null) entry.bonus = (entry.bonus ?? 0) + percent;
     if (kind === "right") entry.right = action.ratio ?? (percent !== null ? `${percent}%` : "yes");
-    years.set(start, entry);
+    if (!entry.sources.includes("merolagani")) entry.sources.push("merolagani");
+  }
+  // Newest announcement per fiscal year only (revisions are listed again).
+  const seen = new Set<number>();
+  const dividendEvents = events
+    .filter((event) => event.type === "dividend")
+    .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
+  for (const event of dividendEvents) {
+    const start = fiscalYearStart(event.fiscalYear);
+    if (start === null || seen.has(start)) continue;
+    seen.add(start);
+    const cash = percentIn(event.title, "Cash");
+    const bonus = percentIn(event.title, "Bonus");
+    if (cash === null && bonus === null) continue;
+    const entry = entryFor(start, event.fiscalYear);
+    const conflicts: string[] = [];
+    if (cash !== null) {
+      if (entry.cash === null) entry.cash = cash;
+      else if (Math.abs(entry.cash - cash) > 0.01) conflicts.push(`ShareSansar lists cash ${cash}%`);
+    }
+    if (bonus !== null) {
+      if (entry.bonus === null) entry.bonus = bonus;
+      else if (Math.abs(entry.bonus - bonus) > 0.01) conflicts.push(`ShareSansar lists bonus ${bonus}%`);
+    }
+    if (conflicts.length > 0) entry.conflict = conflicts.join("; ");
+    if (!entry.sources.includes("sharesansar")) entry.sources.push("sharesansar");
   }
   return [...years.values()].sort((a, b) => b.start - a.start);
 }
@@ -548,9 +620,9 @@ export interface DividendSummary {
   bonusYears: number;
 }
 
-/** The five most recent fiscal years the source lists, with averages. */
-export function fiveYearDividends(actions: CorporateAction[]): DividendSummary {
-  const years = dividendYears(actions).slice(0, 5);
+/** The five most recent fiscal years the sources list, with averages. */
+export function fiveYearDividends(actions: CorporateAction[], events: CompanyEvent[] = []): DividendSummary {
+  const years = dividendYears(actions, events).slice(0, 5);
   const cash = years.map((year) => year.cash).filter((v): v is number => v !== null);
   const bonus = years.map((year) => year.bonus).filter((v): v is number => v !== null);
   const avg = (values: number[]) =>

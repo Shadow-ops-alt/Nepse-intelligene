@@ -428,10 +428,10 @@ function UnavailableFooter({ items, total, statements }: { items: CoverageItem[]
         computed. {CAP_RULE}
       </span>
       <span>
-        <strong>EPS basis:</strong> Merolagani shows EPS for the latest reported quarter
-        as displayed (the Period column shows Q1–Q3 when it is a part-year figure), and its
-        P/E is built on that figure, so part-year P/Es read high. The ShareSansar statement
-        EPS (annualised) is used only when Merolagani has none.
+        <strong>EPS basis:</strong> Merolagani’s EPS is shown as displayed for the fiscal
+        year / quarter it labels (Period column); a Q1–Q3 figure may be part-year, and its
+        published P/E is built on that same figure, so such P/Es can read high. The
+        ShareSansar statement EPS (labelled annualised) is used only when Merolagani has none.
       </span>
       <span>
         <strong>Published coverage</strong> (of {total}):{" "}

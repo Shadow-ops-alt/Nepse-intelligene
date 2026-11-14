@@ -32,6 +32,8 @@ import {
   actionPercent,
   capClasses,
   closeMap,
+  companyEventsPath,
+  dividendYears,
   fiveYearDividends,
   fiscalYearLabel,
   formatKind,
@@ -154,7 +156,15 @@ export const CompanyDetail = memo(function CompanyDetail(props: CompanyDetailPro
         />
       )}
       {tab === "fundamentals" && (
-        <FundamentalsPanel symbol={symbol} state={fundamentals} merged={merged} close={close} company={company} cap={cap} />
+        <FundamentalsPanel
+          symbol={symbol}
+          state={fundamentals}
+          merged={merged}
+          close={close}
+          closeDate={lastClose !== null ? props.lastCloseDate : null}
+          company={company}
+          cap={cap}
+        />
       )}
       {tab === "dividends" && (
         <DividendsPanel symbol={symbol} state={props.actions} company={company} close={close} />
@@ -236,10 +246,10 @@ function ProfilePanel({
       label: "Market cap",
       value:
         cap.value !== null ? (
-          <span title={cap.note}>
+          <>
             {formatRsBig(cap.value)}
-            {cap.derived && <DerivedMark />} <CapBadge value={capClass} />
-          </span>
+            {cap.derived && <DerivedMark title={cap.note} />} <CapBadge value={capClass} />
+          </>
         ) : null,
       raw: cap.value,
     },
@@ -318,6 +328,7 @@ function FundamentalsPanel({
   state,
   merged,
   close,
+  closeDate,
   company,
   cap,
 }: {
@@ -325,6 +336,7 @@ function FundamentalsPanel({
   state: ApiState<FundamentalsResponse>;
   merged: MergedFundamentals | null;
   close: number | null;
+  closeDate: string | null;
   company: Company | undefined;
   cap: Val;
 }) {
@@ -439,7 +451,8 @@ function FundamentalsPanel({
 
       <div>
         <h4 className="muted small" style={{ margin: "0 0 8px" }}>
-          Quick ratios on the last stored close {close !== null ? `(Rs ${formatNumber(close)})` : ""} —{" "}
+          Quick ratios on the last stored close{" "}
+          {close !== null ? `(Rs ${formatNumber(close)}${closeDate ? `, ${closeDate}` : ""})` : ""} —{" "}
           <Badge tone="info">derived</Badge>
         </h4>
         <MiniStats
@@ -508,8 +521,9 @@ function FundamentalsPanel({
           <span className="small">
             UNVERIFIED values as displayed by Merolagani (key ratios) and ShareSansar
             (latest quarterly statement, unaudited). <strong>d</strong> = DERIVED locally.
-            Merolagani’s EPS is the latest reported quarter as displayed (part-year for
-            Q1–Q3), and its P/E uses that figure; the statement EPS is annualised.
+            Merolagani’s EPS is shown for the fiscal year / quarter it labels (a Q1–Q3
+            figure may be part-year) and its P/E uses that figure; the statement EPS is
+            labelled annualised by ShareSansar.
             {missing.length > 0 && ` Not published for ${symbol}: ${missing.join(", ")}.`} Audited
             multi-year statements, cash-flow statements and full historical balance sheets are
             not published by the free pages; only the periods listed above are stored.
@@ -570,11 +584,14 @@ function DividendsPanel({
   company: Company | undefined;
   close: number | null;
 }) {
+  const eventsState = useCachedApi<CompanyEventsResponse>(companyEventsPath(symbol));
   const actions = useMemo(() => state.data?.actions ?? [], [state.data]);
-  const summary = useMemo(() => fiveYearDividends(actions), [actions]);
+  const events = useMemo(() => eventsState.data?.events ?? [], [eventsState.data]);
+  const summary = useMemo(() => fiveYearDividends(actions, events), [actions, events]);
+  const allYears = useMemo(() => dividendYears(actions, events), [actions, events]);
 
-  if (state.loading) return <Spinner label="Loading corporate actions" />;
-  if (actions.length === 0) {
+  if (state.loading || eventsState.loading) return <Spinner label="Loading dividend history" />;
+  if (allYears.length === 0 && actions.length === 0) {
     return (
       <MissingData
         title={`No dividend, bonus or right history stored for ${symbol}`}
@@ -637,6 +654,7 @@ function DividendsPanel({
               <th>Right</th>
               <th className="right">Cash / share</th>
               <th className="right">Yield on close</th>
+              <th>Listed by</th>
             </tr>
           </thead>
           <tbody>
@@ -665,6 +683,14 @@ function DividendsPanel({
                   <td className="right">
                     <ValCell val={yieldVal} kind="percent" />
                   </td>
+                  <td className="muted small">
+                    {year.sources.join(" + ")}
+                    {year.conflict && (
+                      <span className="cell-sub tone-down" title="Merolagani value kept">
+                        ⚠ {year.conflict}
+                      </span>
+                    )}
+                  </td>
                 </tr>
               );
             })}
@@ -672,6 +698,7 @@ function DividendsPanel({
         </table>
       </div>
 
+      {actions.length > 0 && (
       <details>
         <summary className="muted small">All stored corporate actions ({actions.length})</summary>
         <div className="table-scroll short">
@@ -717,13 +744,22 @@ function DividendsPanel({
           </table>
         </div>
       </details>
+      )}
 
       <div className="card-footer" style={{ marginTop: 0 }}>
         <div className="stack-sm">
-          <ProvenanceLine provenance={state.data?.provenance} dataState={state.data?.dataState} sources={["merolagani"]} />
+          <ProvenanceLine
+            provenance={state.data?.provenance}
+            dataState={state.data?.dataState}
+            sources={events.some((event) => event.type === "dividend") ? ["merolagani", "sharesansar (dividend events)"] : ["merolagani"]}
+          />
           <span className="small">
-            Percentages of paid-up value as listed (UNVERIFIED). The source skips 0% years, so
-            — can mean “none declared” or “not listed”; averages use listed years only.
+            Percentages of paid-up value as listed (UNVERIFIED): Merolagani’s dividend history,
+            with ShareSansar’s dividend announcements filling years or bonus figures Merolagani
+            does not list (a disagreement is flagged ⚠ and the Merolagani value kept).
+            {allYears.length > summary.years.length && ` ${allYears.length} fiscal years are listed in all; the five most recent are shown.`}{" "}
+            0% years are not listed, so — can mean “none declared” or “not listed”; averages
+            use listed years only.
             Cash per share and yields are DERIVED (cash % × paid-up value{paidUp ? ` Rs ${paidUp}` : ", not stored"} ÷
             last close). Stored prices are not adjusted for these actions.
           </span>
@@ -766,9 +802,7 @@ function EventsPanel({
   company: Company | undefined;
   news: ApiState<NewsResponse>;
 }) {
-  const state = useCachedApi<CompanyEventsResponse>(
-    `/api/company-events?symbol=${encodeURIComponent(symbol)}&limit=1000`,
-  );
+  const state = useCachedApi<CompanyEventsResponse>(companyEventsPath(symbol));
   const grouped = useMemo(() => {
     const events = state.data?.events ?? [];
     const known = new Set(EVENT_GROUPS.map((group) => group.type));
@@ -825,7 +859,17 @@ function EventsPanel({
           dataState={state.data.dataState}
           sources={[...new Set((state.data.events ?? []).map((event) => event.source ?? "sharesansar"))]}
           asOf={state.data.source.modifiedAt}
-          extra={<span className="muted small">{grouped.filter((g) => g.events.length === 0).map((g) => g.label).join(", ")} — none stored</span>}
+          extra={
+            grouped.some((group) => group.events.length === 0) ? (
+              <span className="muted small">
+                none stored for {symbol}:{" "}
+                {grouped
+                  .filter((group) => group.events.length === 0)
+                  .map((group) => group.label)
+                  .join(", ")}
+              </span>
+            ) : undefined
+          }
         />
       )}
 
@@ -868,6 +912,15 @@ function EventsPanel({
   );
 }
 
+const ENTITIES: Record<string, string> = { nbsp: " ", amp: "&", quot: '"', apos: "'", lt: "<", gt: ">" };
+
+/** Source text sometimes keeps HTML entities (e.g. "&nbsp;"); show them as text. */
+function plain(text: string): string {
+  return text.replace(/&(nbsp|amp|quot|apos|lt|gt|#\d+);/g, (match, name: string) =>
+    name.startsWith("#") ? String.fromCharCode(Number(name.slice(1))) : (ENTITIES[name] ?? match),
+  );
+}
+
 function EventGroup({ label, events }: { label: string; events: CompanyEvent[] }) {
   const [all, setAll] = useState(false);
   const shown = all ? events : events.slice(0, 8);
@@ -889,13 +942,13 @@ function EventGroup({ label, events }: { label: string; events: CompanyEvent[] }
             <span className="muted small mono">{event.date?.slice(0, 10) ?? "undated"}</span>{" "}
             {event.url ? (
               <a href={event.url} target="_blank" rel="noreferrer">
-                {event.title}
+                {plain(event.title)}
               </a>
             ) : (
-              <strong>{event.title}</strong>
+              <strong>{plain(event.title)}</strong>
             )}
             {event.fiscalYear && <span className="muted small"> · FY {fiscalYearLabel(event.fiscalYear)}</span>}
-            {event.detail && <span className="cell-sub" style={{ whiteSpace: "normal", maxWidth: "none" }}>{event.detail}</span>}
+            {event.detail && <span className="cell-sub" style={{ whiteSpace: "normal", maxWidth: "none" }}>{plain(event.detail)}</span>}
           </li>
         ))}
       </ul>
