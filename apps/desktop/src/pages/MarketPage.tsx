@@ -35,7 +35,10 @@ import {
   toneOf,
   useSort,
 } from "../components/ui";
-import { PriceChart } from "../components/PriceChart";
+import { PriceChart, type Overlay, type Study } from "../components/PriceChart";
+
+const INDEX_OVERLAYS: Overlay[] = ["sma50", "sma200"];
+const INDEX_STUDIES: Study[] = [];
 import { nptDate } from "../lib";
 
 type MoverTab = "gainers" | "losers" | "turnover" | "volume";
@@ -414,11 +417,12 @@ export function MarketPage({
             <div className="stack">
               <PriceChart
                 candles={indexHistory}
-                size="compact"
+                size="normal"
                 defaultRange="1Y"
-                defaultOverlays={["sma50", "sma200"]}
-                defaultStudies={[]}
+                defaultOverlays={INDEX_OVERLAYS}
+                defaultStudies={INDEX_STUDIES}
                 showVolume={false}
+                drawingKey="index:NEPSE"
               />
               {indexProfile && (
                 <MiniStats

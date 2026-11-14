@@ -31,6 +31,10 @@ import { PortfolioPage } from "./pages/PortfolioPage";
 import { WatchlistPage } from "./pages/WatchlistPage";
 import { DataPage } from "./pages/DataPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { AlertsPage } from "./pages/AlertsPage";
+import { LivePage } from "./pages/LivePage";
+import { CalculatorPage } from "./pages/CalculatorPage";
+import { useAlerts } from "./alerts";
 
 function useHashRoute(): string {
   const [hash, setHash] = useState(
@@ -71,12 +75,28 @@ const RESEARCH: NavItem[] = [
     key: "1",
   },
   {
+    path: "/live",
+    label: "Live market",
+    title: "Live market",
+    crumb: "Unofficial live LTP from nepalstock.com, refreshed during trading hours",
+    icon: Icon.Clock,
+    key: "2",
+  },
+  {
+    path: "/alerts",
+    label: "Signals & alerts",
+    title: "Signals & alerts",
+    crumb: "Smart brief, RSI 30/50 crosses, MACD/EMA/Supertrend crosses, breakouts",
+    icon: Icon.Alert,
+    key: "3",
+  },
+  {
     path: "/screener",
     label: "Screener",
     title: "Quant screener",
-    crumb: "Technical and risk metrics computed from stored candles",
+    crumb: "Technical, volume and risk screens computed from stored candles",
     icon: Icon.Screener,
-    key: "2",
+    key: "4",
   },
   {
     path: "/companies",
@@ -84,7 +104,7 @@ const RESEARCH: NavItem[] = [
     title: "Companies",
     crumb: "Security master with instrument type, sector and status",
     icon: Icon.Companies,
-    key: "3",
+    key: "9",
   },
 ];
 
@@ -95,7 +115,7 @@ const PERSONAL: NavItem[] = [
     title: "Watchlist",
     crumb: "Saved symbols with returns, risk and correlation",
     icon: Icon.Watchlist,
-    key: "4",
+    key: "",
   },
   {
     path: "/portfolio",
@@ -103,7 +123,15 @@ const PERSONAL: NavItem[] = [
     title: "Portfolio",
     crumb: "Local ledger, cost basis and P&L",
     icon: Icon.Portfolio,
-    key: "5",
+    key: "",
+  },
+  {
+    path: "/calculator",
+    label: "Calculator",
+    title: "Share calculator",
+    crumb: "Buy/sell cost, CGT, breakeven, WACC, bonus/right and dividend yield",
+    icon: Icon.Sigma,
+    key: "",
   },
 ];
 
@@ -114,7 +142,7 @@ const SYSTEM: NavItem[] = [
     title: "Data & coverage",
     crumb: "Source, provenance, imports and honest limits",
     icon: Icon.Data,
-    key: "6",
+    key: "",
   },
   {
     path: "/settings",
@@ -122,7 +150,7 @@ const SYSTEM: NavItem[] = [
     title: "Settings",
     crumb: "Appearance, storage and editions",
     icon: Icon.Settings,
-    key: "7",
+    key: "",
   },
 ];
 
@@ -138,6 +166,7 @@ export function App() {
   const { resolved, setMode } = useTheme();
   const [collapsed, setCollapsed] = useState(() => readFlag(SIDEBAR_KEY, false));
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const alerts = useAlerts(Boolean(metaState.data));
 
   const segments = route.split("/").filter(Boolean);
   const page = segments[0] ?? "market";
@@ -177,7 +206,7 @@ export function App() {
         setPaletteOpen(true);
         return;
       }
-      if (event.altKey && /^[1-7]$/.test(event.key)) {
+      if (event.altKey && /^[1-9]$/.test(event.key)) {
         const item = ALL_NAV.find((nav) => nav.key === event.key);
         if (item) {
           event.preventDefault();
@@ -263,6 +292,12 @@ export function App() {
     content = <WatchlistPage onOpenSymbol={openSymbol} />;
   } else if (page === "data") {
     content = <DataPage meta={meta} onDataChanged={() => metaState.reload()} />;
+  } else if (page === "alerts") {
+    content = <AlertsPage alerts={alerts} onOpenSymbol={openSymbol} />;
+  } else if (page === "live") {
+    content = <LivePage onOpenSymbol={openSymbol} />;
+  } else if (page === "calculator") {
+    content = <CalculatorPage />;
   } else if (page === "settings") {
     content = <SettingsPage meta={meta} onOpenData={() => navigate("/data")} />;
   } else {
@@ -289,9 +324,15 @@ export function App() {
         >
           <ItemIcon />
           <span className="nav-label">{item.label}</span>
-          <span className="nav-key" aria-hidden="true">
-            Alt {item.key}
-          </span>
+          {item.path === "/alerts" && alerts.unread > 0 ? (
+            <span className="nav-count" aria-label={`${alerts.unread} unread alerts`}>
+              {alerts.unread > 99 ? "99+" : alerts.unread}
+            </span>
+          ) : item.key ? (
+            <span className="nav-key" aria-hidden="true">
+              Alt {item.key}
+            </span>
+          ) : null}
         </button>
       );
     });
@@ -447,7 +488,7 @@ export function App() {
             : ""}
         </span>
         <span className="status-item">
-          <kbd>/</kbd> search · <kbd>Alt 1–7</kbd> pages
+          <kbd>/</kbd> search · <kbd>Alt 1–9</kbd> pages
         </span>
       </footer>
 
