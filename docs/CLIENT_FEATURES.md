@@ -64,13 +64,13 @@ Legend: ✅ done · 🟡 partial (works, with a stated data limit) · ⛔ blocke
 
 | Feature | Status | Where | Notes |
 |---|---|---|---|
-| Fundamental desk | 🟡 | Fundamentals | Latest displayed ratios per company (EPS, P/E, book value, P/B, ROE/ROA/NPL where published, dividends). |
+| Fundamental desk | ✅ | Fundamentals (Alt 5) | Screen all companies: EPS, P/E, book value, P/B, ROE, ROA, NPL, diluted EPS, dividend/bonus %, market cap and cap class; presets (value, quality, high dividend, banks NPL<2%); CSV export. Key ratios from Merolagani, quarterly statement from ShareSansar; derived values marked "d". |
 | Company financial detail | 🟡 | Company → Company detail | Profile, displayed ratios and quarterly figures as published; not full audited statements. |
-| All-fundamentals compare desk | 🟡 | Fundamentals → Screen all / Sector medians | |
-| Manual compare of two companies (EPS, ROE, ROA, P/E, P/B, NPL, diluted EPS) | 🟡 | Fundamentals → Compare | Best value highlighted per metric. Diluted EPS and any metric the pages do not publish show "—". |
+| All-fundamentals compare desk | ✅ | Fundamentals → Screen all / Sector medians | Sector medians show how many companies each covers. |
+| Manual compare of two companies (EPS, ROE, ROA, P/E, P/B, NPL, diluted EPS) | ✅ | Fundamentals → Compare | 2–4 companies side by side, best value starred by direction, period history, 5-year dividends and price returns. ROE/ROA/NPL/diluted EPS come from the latest quarterly statement (mainly banks and financials); "—" where a company does not publish them. |
 | Monthly / yearly report (5 years) | 🟡 | Company → Seasonality; Fundamentals → Compare | Monthly and yearly price returns over 5+ years (derived). Audited 5-year financial reports are not published. |
 | More company information | 🟡 | Company → Company detail | Every profile field the sources publish (shares, paid-up, market cap, listing/operation dates, registrar, contacts), dividends/rights, events, news, floorsheet. |
-| Full financial statements (ROE, ROA, NPL, diluted EPS) | ⛔ | — | Only the ratios the public pages display; full statements are not published in machine-readable form. |
+| Full financial statements (ROE, ROA, NPL, diluted EPS) | 🟡 | Company → Company detail → Fundamentals | The latest quarterly statement as displayed (balance sheet, P&L and key metrics incl. ROE, ROA, NPL, diluted EPS) is stored and shown; multi-year audited statements and cash-flow statements are not published. Note: Merolagani EPS can be part-year (quarter), which inflates P/E — the page shows the period. |
 | Audited 5-year fundamentals | ⛔ | — | Not published by the free sources. |
 
 ## Sectors, floorsheet and brokers
