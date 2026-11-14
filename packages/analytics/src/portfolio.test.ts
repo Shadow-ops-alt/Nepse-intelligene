@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { Candle } from "@stock/core";
 import { computePortfolio, screenCandles } from "./portfolio";
+import { adx, averageAbsoluteMove, signalEvents } from "./technicals";
+import { rsi } from "./analysis";
 
 function candle(close: number, day: number, volume = 1000): Candle {
   const date = `2026-01-${String(day).padStart(2, "0")}`;
@@ -126,5 +128,69 @@ describe("screenCandles", () => {
     expect(row.return1M).toBeGreaterThan(0);
     expect(row.signalRating).toMatch(/bullish/);
     expect(Array.isArray(row.patterns)).toBe(true);
+  });
+
+  it("adds short-window returns, the volume profile, trend strength and recent events", () => {
+    // 40 consecutive calendar days rising by 1, then a high-volume jump to 150.
+    const candles = Array.from({ length: 40 }, (_, index) => {
+      const date = new Date(Date.UTC(2026, 0, 1) + index * 86_400_000);
+      const last = index === 39;
+      const item = candle(last ? 150 : 100 + index, 1, last ? 5000 : 1000);
+      item.timestamp = `${date.toISOString().slice(0, 10)}T09:15:00.000Z`;
+      return item;
+    });
+
+    const row = screenCandles(candles);
+    // Base = close 7 / 14 calendar days earlier (index 32 → 132, index 25 → 125).
+    expect(row.return1W).toBe(13.64);
+    expect(row.return2W).toBe(20);
+    expect(row.lastVolume).toBe(5000);
+    expect(row.avgVolume20).toBe(1000);
+    expect(row.volume3d).toBe(7000);
+    expect(row.volume3dRatio).toBe(2.33);
+    expect(row.volume5d).toBe(9000);
+    // No reported turnover: close × volume over the last 5 sessions.
+    expect(row.turnover5d).toBe((135 + 136 + 137 + 138) * 1000 + 150 * 5000);
+    expect(row.priceChange3d).toBe(10.29);
+    expect(row.upDays3).toBe(3);
+    expect(row.volumeBreakout).toBe(true);
+    expect(row.avgAbsMove20).toBe(
+      Math.round(averageAbsoluteMove(candles, 20)! * 100) / 100,
+    );
+    expect(row.supertrendDir).toBe(1);
+    expect(row.adx14).toBe(
+      Math.round(adx(candles, 14).adx.at(-1)! * 100) / 100,
+    );
+    const rsiSeries = rsi(candles.map((item) => item.close), 14);
+    expect(row.rsiPrev).toBe(Math.round(rsiSeries.at(-2)! * 100) / 100);
+    expect(row.events).toEqual(signalEvents(candles, 5));
+    expect(row.events.map((event) => event.type)).toEqual(
+      expect.arrayContaining(["volume-breakout", "price-breakout"]),
+    );
+    expect(screenCandles(candles, { signalLookback: 1 }).events.every(
+      (event) => event.index === 39,
+    )).toBe(true);
+    // Unchanged existing fields: averageVolume20 still includes the last session.
+    expect(row.averageVolume20).toBe(1200);
+  });
+
+  it("uses the close on or before the cutoff and never interpolates", () => {
+    const candles = Array.from({ length: 40 }, (_, index) => {
+      const date = new Date(Date.UTC(2026, 0, 1) + index * 86_400_000);
+      const item = candle(100 + index, 1);
+      item.timestamp = `${date.toISOString().slice(0, 10)}T09:15:00.000Z`;
+      return item;
+    }).filter((_, index) => index !== 32);
+    // Day 32 is missing, so the 7-day base is day 31 (close 131).
+    expect(screenCandles(candles).return1W).toBe(6.11);
+
+    const short = candles.slice(-5);
+    const row = screenCandles(short);
+    expect(row.return1W).toBeNull();
+    expect(row.return2W).toBeNull();
+    expect(row.avgVolume20).toBeNull();
+    expect(row.adx14).toBeNull();
+    expect(row.volumeBreakout).toBe(false);
+    expect(Array.isArray(row.events)).toBe(true);
   });
 });

@@ -243,10 +243,18 @@ describe("api server", () => {
 
       const screener = (await (
         await fetch(`${base}/api/screener`)
-      ).json()) as { rows: Array<{ symbol: string; observations: number }> };
+      ).json()) as {
+        generatedAt: string;
+        rows: Array<{ symbol: string; observations: number }>;
+      };
       expect(screener.rows).toHaveLength(1);
       expect(screener.rows[0]?.symbol).toBe("NABIL");
       expect(screener.rows[0]?.observations).toBe(2);
+      // A repeated call is served from the cached computation.
+      const cachedScreener = (await (
+        await fetch(`${base}/api/screener`)
+      ).json()) as { generatedAt: string };
+      expect(cachedScreener.generatedAt).toBe(screener.generatedAt);
 
       const created = (await (
         await fetch(`${base}/api/portfolio/transactions`, {
@@ -321,6 +329,13 @@ describe("api server", () => {
       ).json()) as { result: { equitySeries: number; candleRows: number } };
       expect(imported.result.equitySeries).toBe(1);
       expect(imported.result.candleRows).toBe(2);
+
+      // An import invalidates the cached screener computation.
+      const afterImport = (await (
+        await fetch(`${base}/api/screener`)
+      ).json()) as { generatedAt: string; rows: unknown[] };
+      expect(afterImport.rows).toHaveLength(1);
+      expect(afterImport.generatedAt).not.toBe(screener.generatedAt);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
@@ -715,6 +730,408 @@ describe("api server", () => {
       });
       expect(byName.get("floorsheet")?.available).toBe(false);
       expect(byName.get("floorsheet")?.unavailableReason).toBeTruthy();
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("serves latest fundamentals and corporate actions for all symbols", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "stock-api-all-"));
+    directories.push(directory);
+    const dbPath = join(directory, "personal.db");
+    const dataDir = join(directory, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const store = new PersonalStore(dbPath);
+    store.upsertSnapshot("fundamentals", "NGF", envelope({
+      symbol: "NGF",
+      asOf: "2026-11-14T00:00:00.000Z",
+      period: "2026-11-13",
+      metrics: { nav: { metric: "nav", value: 9.94, unit: "currency" } },
+    }));
+    store.upsertSnapshot("fundamentals", "NABIL", envelope({
+      symbol: "NABIL",
+      asOf: "2026-11-14T00:00:00.000Z",
+      period: "FY083-084",
+      metrics: { eps: { metric: "eps", value: 33.89, unit: "currency" } },
+    }));
+    store.upsertSnapshot("corporateActions", "NABIL", envelope([
+      { symbol: "NABIL", type: "cashDividend", ratio: "10.8%", value: 10.8 },
+      { symbol: "NABIL", type: "bonusShare", ratio: "5%", value: 5 },
+    ]));
+    // A stored action without its own symbol takes the snapshot key.
+    store.upsertSnapshot("corporateActions", "AHL", envelope([
+      { type: "rightShare", ratio: "1:1" },
+    ]));
+    store.close();
+
+    const { server } = createApiServer({
+      dbPath,
+      dataDir,
+      env: { NODE_ENV: "production", DATA_EDITION: "free", PERSONAL_DATA_DIR: dataDir },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+
+    try {
+      const fundamentals = (await (
+        await fetch(`${base}/api/fundamentals/latest`)
+      ).json()) as {
+        providerId: string;
+        rows: Array<{ symbol: string; period: string; metrics: Record<string, { value: number }> }>;
+        provenance: { classification: string; state: string } | null;
+        dataState: { total: number; state: string };
+      };
+      expect(fundamentals.providerId).toBe("free-source");
+      expect(fundamentals.rows.map((row) => row.symbol)).toEqual(["NABIL", "NGF"]);
+      expect(fundamentals.rows[0]?.metrics.eps?.value).toBe(33.89);
+      expect(fundamentals.provenance?.classification).toBe("UNVERIFIED");
+      expect(fundamentals.provenance?.state).not.toBe("live");
+      expect(fundamentals.dataState.total).toBe(2);
+
+      const actions = (await (
+        await fetch(`${base}/api/corporate-actions/all`)
+      ).json()) as {
+        providerId: string;
+        actions: Array<{ symbol: string; type: string }>;
+        provenance: { classification: string } | null;
+        dataState: { total: number };
+      };
+      expect(actions.actions.map((action) => `${action.symbol}:${action.type}`)).toEqual([
+        "AHL:rightShare",
+        "NABIL:cashDividend",
+        "NABIL:bonusShare",
+      ]);
+      expect(actions.provenance?.classification).toBe("UNVERIFIED");
+      expect(actions.dataState.total).toBe(2);
+
+      // The per-symbol routes are unchanged and never read "latest"/"all" as a symbol.
+      const one = (await (
+        await fetch(`${base}/api/corporate-actions?symbol=NABIL`)
+      ).json()) as { actions: unknown[] };
+      expect(one.actions).toHaveLength(2);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+
+    // Nothing stored: empty lists and an unavailable state, never mocked rows.
+    const emptyDirectory = mkdtempSync(join(tmpdir(), "stock-api-all-empty-"));
+    directories.push(emptyDirectory);
+    const empty = createApiServer({
+      dbPath: join(emptyDirectory, "personal.db"),
+      dataDir: emptyDirectory,
+      env: { NODE_ENV: "production", DATA_EDITION: "free", PERSONAL_DATA_DIR: emptyDirectory },
+    }).server;
+    await new Promise<void>((resolve) => empty.listen(0, "127.0.0.1", resolve));
+    const emptyBase = `http://127.0.0.1:${(empty.address() as AddressInfo).port}`;
+    try {
+      const fundamentals = (await (
+        await fetch(`${emptyBase}/api/fundamentals/latest`)
+      ).json()) as { rows: unknown[]; provenance: unknown; dataState: { state: string } };
+      expect(fundamentals.rows).toEqual([]);
+      expect(fundamentals.provenance).toBeNull();
+      expect(fundamentals.dataState.state).toBe("unavailable");
+      const actions = (await (
+        await fetch(`${emptyBase}/api/corporate-actions/all`)
+      ).json()) as { actions: unknown[]; provenance: unknown };
+      expect(actions.actions).toEqual([]);
+      expect(actions.provenance).toBeNull();
+    } finally {
+      await new Promise<void>((resolve) => empty.close(() => resolve()));
+    }
+  });
+
+  it("reads company events from the data folder and tolerates a missing file", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "stock-api-events-"));
+    directories.push(directory);
+    const dbPath = join(directory, "personal.db");
+    const dataDir = join(directory, "data");
+    mkdirSync(dataDir, { recursive: true });
+
+    const { server } = createApiServer({
+      dbPath,
+      dataDir,
+      env: { NODE_ENV: "production", DATA_EDITION: "free", PERSONAL_DATA_DIR: dataDir },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+
+    type EventsResponse = {
+      providerId: string;
+      symbol: string | null;
+      types: string[];
+      events: Array<{
+        symbol: string;
+        type: string;
+        date: string | null;
+        fiscalYear: string | null;
+        title: string;
+        detail: string | null;
+        url: string | null;
+        source: string | null;
+        classification: string;
+        fetchedAt: string | null;
+      }>;
+      source: { file: string; modifiedAt: string } | null;
+      dataState: { state: string; classification?: string };
+    };
+
+    try {
+      const missing = await fetch(`${base}/api/company-events?symbol=NABIL`);
+      expect(missing.status).toBe(200);
+      const missingBody = (await missing.json()) as EventsResponse;
+      expect(missingBody.events).toEqual([]);
+      expect(missingBody.types).toEqual([]);
+      expect(missingBody.source).toBeNull();
+      expect(missingBody.symbol).toBe("NABIL");
+      expect(missingBody.dataState.state).toBe("unavailable");
+
+      writeFileSync(
+        join(dataDir, "company-events.csv"),
+        [
+          "symbol,type,date,fiscalYear,title,detail,url,source,classification,notes,fetchedAt",
+          'NABIL,dividend,2026-10-01,082/83,"Cash dividend 10%, bonus 5%",,https://example.com/1,sharesansar,UNVERIFIED,"a=1; b=2",2026-11-14T10:00:00.000Z',
+          'NABIL,agm,2026-11-05,082/83,"25th AGM","Venue: ""Hotel"", Kathmandu\r\nSecond line",,sharesansar,UNVERIFIED,,2026-11-14T10:00:00.000Z',
+          "AHL,dividend,,,Proposed dividend,,,sharesansar,,,",
+          "",
+        ].join("\r\n"),
+      );
+
+      const all = (await (
+        await fetch(`${base}/api/company-events`)
+      ).json()) as EventsResponse;
+      expect(all.symbol).toBeNull();
+      expect(all.types).toEqual(["agm", "dividend"]);
+      expect(all.source?.file).toMatch(/company-events\.csv$/);
+      expect(all.source?.modifiedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      // Newest dated first; an undated row last.
+      expect(all.events.map((event) => event.type)).toEqual(["agm", "dividend", "dividend"]);
+      expect(all.events[0]?.detail).toBe('Venue: "Hotel", Kathmandu\r\nSecond line');
+      expect(all.events[1]?.title).toBe("Cash dividend 10%, bonus 5%");
+      expect(all.events[1]?.url).toBe("https://example.com/1");
+      expect(all.events[1]?.detail).toBeNull();
+      expect(all.events[2]).toMatchObject({
+        symbol: "AHL",
+        date: null,
+        fiscalYear: null,
+        classification: "UNVERIFIED",
+        fetchedAt: null,
+      });
+      expect(all.dataState.classification).toBe("UNVERIFIED");
+      expect(all.dataState.state).not.toBe("live");
+
+      const filtered = (await (
+        await fetch(`${base}/api/company-events?symbol=nabil&type=dividend&limit=200`)
+      ).json()) as EventsResponse;
+      expect(filtered.symbol).toBe("NABIL");
+      expect(filtered.types).toEqual(["agm", "dividend"]);
+      expect(filtered.events).toHaveLength(1);
+      expect(filtered.events[0]?.fiscalYear).toBe("082/83");
+
+      const limited = (await (
+        await fetch(`${base}/api/company-events?limit=1`)
+      ).json()) as EventsResponse;
+      expect(limited.events).toHaveLength(1);
+
+      const bad = await fetch(`${base}/api/company-events?limit=lots`);
+      expect(bad.status).toBe(400);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("extends screener rows and serves recent signals from one cached pass", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "stock-api-signals-"));
+    directories.push(directory);
+    const dbPath = join(directory, "personal.db");
+    const dataDir = join(directory, "data");
+    mkdirSync(dataDir, { recursive: true });
+
+    const day = (offset: number) =>
+      new Date(Date.UTC(2026, 0, 1) + offset * 86_400_000).toISOString().slice(0, 10);
+    // A slow decline, then a high-volume jump `jumpFromEnd` sessions before the end.
+    const series = (
+      symbol: string,
+      length: number,
+      jumpFromEnd: number,
+      startOffset = 0,
+    ): Candle[] =>
+      Array.from({ length }, (_, index) => {
+        const jump = index === length - 1 - jumpFromEnd;
+        const after = index > length - 1 - jumpFromEnd;
+        const close = jump || after ? 190 : 200 - index * 0.2;
+        return {
+          symbol,
+          timeframe: "1day",
+          timestamp: `${day(startOffset + index)}T09:15:00.000Z`,
+          open: jump ? 150 : close,
+          high: close + 1,
+          low: jump ? 149 : close - 1,
+          close,
+          volume: jump ? 20_000 : 1000,
+          adjusted: false,
+        };
+      });
+
+    const store = new PersonalStore(dbPath);
+    store.upsertCandles(envelope(series("NABIL", 260, 0)), "equity");
+    store.upsertCandles(envelope(series("HDL", 260, 2)), "equity");
+    // A series that stopped trading 100 days before the others.
+    store.upsertCandles(envelope(series("OLDCO", 160, 0)), "equity");
+    store.close();
+
+    const { server } = createApiServer({
+      dbPath,
+      dataDir,
+      env: { NODE_ENV: "production", DATA_EDITION: "free", PERSONAL_DATA_DIR: dataDir },
+    });
+    await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+    const { port } = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+
+    type Row = Record<string, unknown> & {
+      symbol: string;
+      observations: number;
+      events: Array<{ id: string; index: number; timestamp: string; type: string }>;
+    };
+    type Signals = {
+      providerId: string;
+      generatedAt: string;
+      latestSession: string | null;
+      events: Array<{
+        id: string;
+        index: number;
+        timestamp: string;
+        type: string;
+        direction: string;
+        label: string;
+        detail: string;
+        symbol: string;
+      }>;
+    };
+
+    try {
+      const screener = (await (
+        await fetch(`${base}/api/screener`)
+      ).json()) as { generatedAt: string; rows: Row[] };
+      expect(screener.rows.map((row) => row.symbol)).toEqual(["HDL", "NABIL", "OLDCO"]);
+      const nabil = screener.rows.find((row) => row.symbol === "NABIL")!;
+      for (const field of [
+        "return1W",
+        "return2W",
+        "lastVolume",
+        "avgVolume20",
+        "volume3d",
+        "volume3dRatio",
+        "volume5d",
+        "turnover5d",
+        "priceChange3d",
+        "upDays3",
+        "volumeBreakout",
+        "avgAbsMove20",
+        "supertrendDir",
+        "adx14",
+        "rsiPrev",
+        "events",
+      ]) {
+        expect(nabil).toHaveProperty(field);
+      }
+      expect(nabil.lastVolume).toBe(20_000);
+      expect(nabil.avgVolume20).toBe(1000);
+      expect(nabil.volume5d).toBe(24_000);
+      expect(nabil.upDays3).toBe(1);
+      expect(nabil.volumeBreakout).toBe(true);
+      expect(typeof nabil.return1W).toBe("number");
+      expect(typeof nabil.rsiPrev).toBe("number");
+      expect([1, -1]).toContain(nabil.supertrendDir);
+      // Row events cover the series' own last 5 sessions.
+      expect(nabil.events.map((event) => event.type)).toEqual(
+        expect.arrayContaining(["volume-breakout", "price-breakout"]),
+      );
+      for (const row of screener.rows) {
+        for (const event of row.events) {
+          expect(event.index).toBeGreaterThanOrEqual(row.observations - 5);
+        }
+      }
+      const oldco = screener.rows.find((row) => row.symbol === "OLDCO")!;
+      expect(oldco.events.length).toBeGreaterThan(0);
+
+      const signals = (await (
+        await fetch(`${base}/api/signals`)
+      ).json()) as Signals;
+      expect(signals.providerId).toBe("free-source");
+      expect(signals.generatedAt).toBe(screener.generatedAt);
+      expect(signals.latestSession).toBe(day(259));
+      expect(signals.events.length).toBeGreaterThan(0);
+      for (const event of signals.events) {
+        expect(Object.keys(event).sort()).toEqual(
+          ["detail", "direction", "id", "index", "label", "symbol", "timestamp", "type"],
+        );
+        // Within the market's last 5 sessions: OLDCO's stale events stay out.
+        expect(event.timestamp.slice(0, 10) >= day(255)).toBe(true);
+      }
+      expect(signals.events.some((event) => event.symbol === "OLDCO")).toBe(false);
+      // Newest first, then by symbol.
+      const order = signals.events.map((event) => `${event.timestamp}|${event.symbol}`);
+      expect(order).toEqual(
+        [...order].sort((a, b) => {
+          const [ta, sa] = a.split("|");
+          const [tb, sb] = b.split("|");
+          return ta! === tb! ? sa!.localeCompare(sb!) : ta! < tb! ? 1 : -1;
+        }),
+      );
+      expect(signals.events[0]?.symbol).toBe("NABIL");
+      expect(
+        signals.events.some(
+          (event) => event.symbol === "HDL" && event.type === "volume-breakout",
+        ),
+      ).toBe(true);
+
+      const lastSession = (await (
+        await fetch(`${base}/api/signals?lookback=1`)
+      ).json()) as Signals;
+      expect(lastSession.events.length).toBeGreaterThan(0);
+      expect(lastSession.events.every((event) => event.symbol === "NABIL")).toBe(true);
+
+      const widest = (await (
+        await fetch(`${base}/api/signals?lookback=99`)
+      ).json()) as Signals & { lookback: number };
+      expect(widest.lookback).toBe(20);
+      expect(widest.events.length).toBeGreaterThanOrEqual(signals.events.length);
+
+      expect((await fetch(`${base}/api/signals?lookback=soon`)).status).toBe(400);
+
+      // Another process writing to the database invalidates the cache.
+      const writer = new PersonalStore(dbPath);
+      writer.upsertCandles(
+        envelope([
+          {
+            symbol: "NABIL",
+            timeframe: "1day",
+            timestamp: `${day(260)}T09:15:00.000Z`,
+            open: 190,
+            high: 192,
+            low: 189,
+            close: 191,
+            volume: 1500,
+            adjusted: false,
+          },
+        ]),
+        "equity",
+      );
+      writer.close();
+      const refreshed = (await (
+        await fetch(`${base}/api/screener`)
+      ).json()) as { generatedAt: string; rows: Row[] };
+      expect(
+        refreshed.rows.find((row) => row.symbol === "NABIL")?.observations,
+      ).toBe(261);
+      const refreshedSignals = (await (
+        await fetch(`${base}/api/signals`)
+      ).json()) as Signals;
+      expect(refreshedSignals.latestSession).toBe(day(260));
+      expect(refreshedSignals.generatedAt).toBe(refreshed.generatedAt);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

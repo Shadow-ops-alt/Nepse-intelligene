@@ -80,6 +80,27 @@ export interface NewImportAudit {
   failedSymbols: string[];
 }
 
+/** Maps a candles row to a Candle, keeping the established key order. */
+function candleFromRow(row: Record<string, unknown>): Candle {
+  const candle = {
+    symbol: String(row.symbol),
+    timeframe: String(row.timeframe) as Candle["timeframe"],
+    timestamp: String(row.timestamp),
+    open: Number(row.open),
+    high: Number(row.high),
+    low: Number(row.low),
+    close: Number(row.close),
+    volume: Number(row.volume),
+  } as Candle;
+  if (row.turnover !== null) candle.turnover = Number(row.turnover);
+  if (row.trades !== null) candle.trades = Number(row.trades);
+  candle.adjusted = Number(row.adjusted) === 1;
+  if (row.adjustment_factor !== null) {
+    candle.adjustmentFactor = Number(row.adjustment_factor);
+  }
+  return candle;
+}
+
 /**
  * Provenance retained on every stored row. `asOf` is the source's own
  * observation time when available; `fetchedAt` is when this app retrieved it.
@@ -576,24 +597,39 @@ export class PersonalStore {
       .all(...params);
 
     return rows.map((row) => ({
-      data: {
-        symbol: String(row.symbol),
-        timeframe: String(row.timeframe) as Candle["timeframe"],
-        timestamp: String(row.timestamp),
-        open: Number(row.open),
-        high: Number(row.high),
-        low: Number(row.low),
-        close: Number(row.close),
-        volume: Number(row.volume),
-        ...(row.turnover === null ? {} : { turnover: Number(row.turnover) }),
-        ...(row.trades === null ? {} : { trades: Number(row.trades) }),
-        adjusted: Number(row.adjusted) === 1,
-        ...(row.adjustment_factor === null
-          ? {}
-          : { adjustmentFactor: Number(row.adjustment_factor) }),
-      },
+      data: candleFromRow(row),
       provenance: this.provenanceFromRow(row),
     }));
+  }
+
+  /**
+   * A whole series without per-row provenance (the rows of one import share
+   * it), plus the newest row's provenance. Reads only the candle columns, so
+   * it is about twice as fast as getCandlesWithProvenance for bulk scans such
+   * as the screener.
+   */
+  getCandleSeries(
+    providerId: string,
+    symbol: string,
+    kind: SeriesKind = "equity",
+  ): { candles: Candle[]; latest: Provenanced<{ close: number; timestamp: string }> | null } {
+    const candles = this.db
+      .prepare(
+        `SELECT symbol, timeframe, timestamp, open, high, low, close, volume,
+                turnover, trades, adjusted, adjustment_factor
+         FROM candles
+         WHERE provider_id = ? AND kind = ? AND symbol = ?
+         ORDER BY timestamp`,
+      )
+      .all(providerId, kind, symbol.toUpperCase())
+      .map(candleFromRow);
+    return {
+      candles,
+      latest:
+        candles.length > 0
+          ? this.getLatestCandleWithProvenance(providerId, symbol, kind)
+          : null,
+    };
   }
 
   getQuotes(providerId: string): Quote[] {
@@ -774,6 +810,28 @@ export class PersonalStore {
       .map((row) => String(row.natural_key));
   }
 
+  /**
+   * Every stored snapshot of a capability (e.g. the latest fundamentals of
+   * all symbols) in one query, ordered by natural key ascending.
+   */
+  listSnapshotsWithProvenance<T>(
+    providerId: string,
+    capability: string,
+  ): Array<Provenanced<T> & { naturalKey: string }> {
+    return this.db
+      .prepare(
+        `SELECT * FROM snapshots
+         WHERE provider_id = ? AND capability = ?
+         ORDER BY natural_key`,
+      )
+      .all(providerId, capability)
+      .map((row) => ({
+        naturalKey: String(row.natural_key),
+        data: JSON.parse(String(row.payload)) as T,
+        provenance: this.provenanceFromRow(row),
+      }));
+  }
+
   getSnapshotWithProvenance<T>(
     providerId: string,
     capability: string,
@@ -824,6 +882,17 @@ export class PersonalStore {
       syncRuns: count("sync_runs"),
       lastFetchedAt: fetched?.latest ? String(fetched.latest) : null,
     };
+  }
+
+  /**
+   * SQLite's `PRAGMA data_version`: it changes whenever ANOTHER connection
+   * (e.g. a CLI sync) commits to the database; this connection's own writes
+   * do not change it. Cheap enough to poll per request to decide whether a
+   * cached derivation must re-check `summary()`.
+   */
+  dataVersion(): number {
+    const row = this.db.prepare("PRAGMA data_version").get();
+    return Number(row?.data_version ?? 0);
   }
 
   /**

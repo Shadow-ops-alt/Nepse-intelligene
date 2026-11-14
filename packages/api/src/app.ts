@@ -25,9 +25,12 @@ import {
   analyzeCandles,
   computePortfolio,
   screenCandles,
+  type ScreenerRow,
+  type SignalEvent,
   type TradeInput,
 } from "@stock/analytics";
 import { syncPersonalData } from "@stock/personal";
+import { parseCsvRecords } from "./csv";
 
 export interface ApiConfig {
   dbPath: string;
@@ -348,6 +351,156 @@ function inspectDataDir(dataDir: string): DataDirInspection {
   };
 }
 
+/** One row of `<dataDir>/company-events.csv` (written by `personal:details`). */
+export interface CompanyEvent {
+  symbol: string;
+  type: string;
+  date: string | null;
+  fiscalYear: string | null;
+  title: string;
+  detail: string | null;
+  url: string | null;
+  source: string | null;
+  classification: string;
+  fetchedAt: string | null;
+}
+
+interface CompanyEventsFile {
+  path: string;
+  modifiedAt: string;
+  mtimeMs: number;
+  size: number;
+  events: CompanyEvent[];
+  types: string[];
+  /** Newest `fetchedAt` in the file, if any row carries one. */
+  lastFetchedAt: string | null;
+}
+
+const COMPANY_EVENTS_FILE = "company-events.csv";
+
+function optionalText(value: string | undefined): string | null {
+  const text = (value ?? "").trim();
+  return text === "" ? null : text;
+}
+
+/** Newest date first (undated last), then symbol, then type. */
+function compareCompanyEvents(a: CompanyEvent, b: CompanyEvent): number {
+  if (a.date !== b.date) {
+    if (a.date === null) return 1;
+    if (b.date === null) return -1;
+    return a.date < b.date ? 1 : -1;
+  }
+  return a.symbol.localeCompare(b.symbol) || a.type.localeCompare(b.type);
+}
+
+/**
+ * Reads and parses company-events.csv, re-parsing only when the file's mtime
+ * or size changes. A missing or unreadable file is `null`, never an error.
+ */
+function createCompanyEventsReader(dataDir: string) {
+  const path = resolve(dataDir, COMPANY_EVENTS_FILE);
+  let cached: CompanyEventsFile | null = null;
+  return (): CompanyEventsFile | null => {
+    let stats: ReturnType<typeof statSync>;
+    let text: string;
+    try {
+      stats = statSync(path);
+      if (!stats.isFile()) return null;
+      if (
+        cached &&
+        cached.mtimeMs === Number(stats.mtimeMs) &&
+        cached.size === Number(stats.size)
+      ) {
+        return cached;
+      }
+      text = readFileSync(path, "utf8");
+    } catch {
+      return null;
+    }
+    const events: CompanyEvent[] = [];
+    const types = new Set<string>();
+    let lastFetchedAt: string | null = null;
+    for (const record of parseCsvRecords(text)) {
+      const symbol = (record.symbol ?? "").trim().toUpperCase();
+      if (!symbol) continue;
+      const event: CompanyEvent = {
+        symbol,
+        type: (record.type ?? "").trim(),
+        date: optionalText(record.date),
+        fiscalYear: optionalText(record.fiscalYear),
+        title: (record.title ?? "").trim(),
+        detail: optionalText(record.detail),
+        url: optionalText(record.url),
+        source: optionalText(record.source),
+        // Scraped rows are unofficial: an unlabelled row stays UNVERIFIED.
+        classification: optionalText(record.classification) ?? "UNVERIFIED",
+        fetchedAt: optionalText(record.fetchedAt),
+      };
+      if (event.type) types.add(event.type);
+      if (event.fetchedAt && (!lastFetchedAt || event.fetchedAt > lastFetchedAt)) {
+        lastFetchedAt = event.fetchedAt;
+      }
+      events.push(event);
+    }
+    events.sort(compareCompanyEvents);
+    cached = {
+      path,
+      modifiedAt: new Date(Number(stats.mtimeMs)).toISOString(),
+      mtimeMs: Number(stats.mtimeMs),
+      size: Number(stats.size),
+      events,
+      types: [...types].sort(),
+      lastFetchedAt,
+    };
+    return cached;
+  };
+}
+
+/** Screener row as computed (provenance is attached per request). */
+interface CachedScreenerEntry {
+  row: ScreenerRow;
+  provenance: StoredProvenance;
+  asOf: string;
+}
+
+interface ScreenerComputation {
+  key: string;
+  generatedAt: string;
+  durationMs: number;
+  entries: CachedScreenerEntry[];
+  /** Events of each series' last SIGNAL_MAX_LOOKBACK sessions, newest first. */
+  signals: Array<SignalEvent & { symbol: string }>;
+  /** Distinct market session dates (YYYY-MM-DD), newest first, at most SIGNAL_MAX_LOOKBACK. */
+  sessions: string[];
+}
+
+/** Sessions of signal events kept on each screener row. */
+const SCREENER_EVENT_LOOKBACK = 5;
+/** Largest `/api/signals` lookback; events are computed once for this many sessions. */
+const SIGNAL_MAX_LOOKBACK = 20;
+/** Series screened between event-loop yields during a cold computation. */
+const SCREENER_CHUNK = 8;
+
+function compareSignals(
+  a: SignalEvent & { symbol: string },
+  b: SignalEvent & { symbol: string },
+): number {
+  if (a.timestamp !== b.timestamp) return a.timestamp < b.timestamp ? 1 : -1;
+  return a.symbol.localeCompare(b.symbol);
+}
+
+function integerParam(
+  value: string | null,
+  fallback: number,
+  min: number,
+  max: number,
+): number | null {
+  if (value === null || value.trim() === "") return fallback;
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed)) return null;
+  return Math.min(max, Math.max(min, parsed));
+}
+
 export function createApiServer(config: ApiConfig): ApiHandle {
   const env = config.env ?? process.env;
   const policy = policyFromEnv(env);
@@ -367,6 +520,131 @@ export function createApiServer(config: ApiConfig): ApiHandle {
   const providerId = provider?.descriptor.id ?? PERSONAL_PROVIDER_ID;
   const allCapabilities = CapabilitySchema.options as Capability[];
   let syncInFlight = false;
+  const readCompanyEvents = createCompanyEventsReader(config.dataDir);
+  const sourceClassification = () =>
+    provider ? classificationForSourceType(provider.descriptor.sourceType) : "MISSING";
+
+  // The full screener computation (all series) is cached per provider
+  // namespace and keyed by a store data version, so /api/screener and
+  // /api/signals share one pass and an external re-sync is picked up.
+  const screenerCache = new Map<string, ScreenerComputation>();
+  const screenerInFlight = new Map<string, Promise<ScreenerComputation>>();
+  // summary() scans the candle table (~0.1 s on a full archive), so it is
+  // re-run only when another connection has committed (SQLite data_version)
+  // or this process imported (generation); otherwise the last key stands.
+  const screenerKeyMemo = new Map<
+    string,
+    { dataVersion: number; generation: number; key: string }
+  >();
+  let screenerGeneration = 0;
+
+  const screenerKey = (namespace: string): string => {
+    const dataVersion = store.dataVersion();
+    const memo = screenerKeyMemo.get(namespace);
+    if (
+      memo &&
+      memo.dataVersion === dataVersion &&
+      memo.generation === screenerGeneration
+    ) {
+      return memo.key;
+    }
+    const summary = store.summary(namespace);
+    const key = [
+      namespace,
+      screenerGeneration,
+      summary.companies,
+      summary.candles,
+      summary.quotes,
+      summary.snapshots,
+      summary.syncRuns,
+      summary.lastFetchedAt ?? "",
+    ].join("|");
+    screenerKeyMemo.set(namespace, {
+      dataVersion,
+      generation: screenerGeneration,
+      key,
+    });
+    return key;
+  };
+
+  const invalidateScreener = (): void => {
+    screenerGeneration += 1;
+    screenerCache.clear();
+    screenerKeyMemo.clear();
+  };
+
+  const computeScreener = async (
+    namespace: string,
+    key: string,
+  ): Promise<ScreenerComputation> => {
+    const started = performance.now();
+    const symbols = store.getSymbolsWithCandles(namespace);
+    const entries: CachedScreenerEntry[] = [];
+    const signals: Array<SignalEvent & { symbol: string }> = [];
+    const sessionDates = new Set<string>();
+    for (let index = 0; index < symbols.length; index += 1) {
+      // Yield between chunks so a cold computation does not stall other requests.
+      if (index > 0 && index % SCREENER_CHUNK === 0) {
+        await new Promise<void>((resolveYield) => setImmediate(resolveYield));
+      }
+      const symbol = symbols[index]!;
+      const { candles, latest } = store.getCandleSeries(namespace, symbol);
+      const last = candles.at(-1);
+      if (!last || !latest) continue;
+      const screened = screenCandles(candles, {
+        signalLookback: SIGNAL_MAX_LOOKBACK,
+      });
+      // Filtering the 20-session events to the last 5 sessions is identical
+      // to signalEvents(candles, 5): ids and order do not depend on lookback.
+      const recentFrom = screened.observations - SCREENER_EVENT_LOOKBACK;
+      entries.push({
+        row: {
+          ...screened,
+          events: screened.events.filter((event) => event.index >= recentFrom),
+        },
+        provenance: latest.provenance,
+        asOf: last.timestamp,
+      });
+      for (const event of screened.events) signals.push({ ...event, symbol });
+      for (const candle of candles.slice(-SIGNAL_MAX_LOOKBACK)) {
+        sessionDates.add(candle.timestamp.slice(0, 10));
+      }
+    }
+    signals.sort(compareSignals);
+    return {
+      key,
+      generatedAt: new Date().toISOString(),
+      durationMs: Math.round(performance.now() - started),
+      entries,
+      signals,
+      // Every one of the market's last N sessions is within the last N
+      // sessions of some series, so the top N of this union are exactly the
+      // market's last N session dates.
+      sessions: [...sessionDates].sort().reverse().slice(0, SIGNAL_MAX_LOOKBACK),
+    };
+  };
+
+  const screenerData = (namespace: string): Promise<ScreenerComputation> => {
+    const key = screenerKey(namespace);
+    const cached = screenerCache.get(namespace);
+    if (cached && cached.key === key) return Promise.resolve(cached);
+    const pending = screenerInFlight.get(key);
+    if (pending) return pending;
+    const generation = screenerGeneration;
+    const work = computeScreener(namespace, key)
+      .then((result) => {
+        // An import that finished meanwhile invalidated this generation.
+        if (generation === screenerGeneration) {
+          screenerCache.set(namespace, result);
+        }
+        return result;
+      })
+      .finally(() => {
+        screenerInFlight.delete(key);
+      });
+    screenerInFlight.set(key, work);
+    return work;
+  };
 
   const server = createServer((request, response) => {
     void (async () => {
@@ -785,6 +1063,132 @@ export function createApiServer(config: ApiConfig): ApiHandle {
 
         if (
           request.method === "GET" &&
+          url.pathname === "/api/fundamentals/latest"
+        ) {
+          const entries = store.listSnapshotsWithProvenance<{ symbol?: string }>(
+            providerId,
+            "fundamentals",
+          );
+          const views = entries.map((entry) =>
+            provenanceView(entry.provenance, "fundamentals"),
+          );
+          const newest = views.reduce<ProvenanceView | null>(
+            (best, view) => (!best || view.fetchedAt > best.fetchedAt ? view : best),
+            null,
+          );
+          sendJson(response, 200, {
+            providerId,
+            rows: entries.map((entry) => ({
+              ...entry.data,
+              symbol: entry.data.symbol ?? entry.naturalKey,
+            })),
+            provenance: newest,
+            dataState: summarizeProvenance(views),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/corporate-actions/all"
+        ) {
+          const entries = store.listSnapshotsWithProvenance<unknown>(
+            providerId,
+            "corporateActions",
+          );
+          const views = entries.map((entry) =>
+            provenanceView(entry.provenance, "corporateActions"),
+          );
+          const newest = views.reduce<ProvenanceView | null>(
+            (best, view) => (!best || view.fetchedAt > best.fetchedAt ? view : best),
+            null,
+          );
+          const actions = entries.flatMap((entry) =>
+            Array.isArray(entry.data)
+              ? (entry.data as Array<Record<string, unknown>>).map((action) => ({
+                  ...action,
+                  symbol:
+                    typeof action.symbol === "string" && action.symbol
+                      ? action.symbol
+                      : entry.naturalKey,
+                }))
+              : [],
+          );
+          sendJson(response, 200, {
+            providerId,
+            actions,
+            provenance: newest,
+            dataState: summarizeProvenance(views),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/company-events"
+        ) {
+          const symbol =
+            (url.searchParams.get("symbol") ?? "").trim().toUpperCase() || null;
+          const type = (url.searchParams.get("type") ?? "").trim().toLowerCase();
+          const limit = integerParam(url.searchParams.get("limit"), 200, 1, 5000);
+          if (limit === null) {
+            sendJson(response, 400, { error: "limit must be an integer" });
+            return;
+          }
+          const file = readCompanyEvents();
+          if (!file) {
+            sendJson(response, 200, {
+              providerId,
+              symbol,
+              types: [],
+              events: [],
+              total: 0,
+              source: null,
+              unavailableReason: `${COMPANY_EVENTS_FILE} has not been written to the data folder yet (run personal:details)`,
+              dataState: emptyDataState("MISSING"),
+            });
+            return;
+          }
+          const matched = file.events.filter(
+            (event) =>
+              (symbol === null || event.symbol === symbol) &&
+              (!type || event.type.toLowerCase() === type),
+          );
+          const fetchedAt = file.lastFetchedAt ?? file.modifiedAt;
+          const classification = sourceClassification();
+          const view =
+            file.events.length > 0
+              ? provenanceView(
+                  {
+                    providerId,
+                    sourceType: provider?.descriptor.sourceType ?? "unofficial",
+                    termsStatus: provider?.descriptor.termsStatus ?? "unverified",
+                    productionReady: false,
+                    fetchedAt,
+                    asOf: fetchedAt,
+                    classification,
+                  },
+                  "corporateActions",
+                )
+              : null;
+          sendJson(response, 200, {
+            providerId,
+            symbol,
+            types: file.types,
+            events: matched.slice(0, limit),
+            total: matched.length,
+            source: { file: file.path, modifiedAt: file.modifiedAt },
+            unavailableReason:
+              file.events.length === 0 ? `${COMPANY_EVENTS_FILE} has no event rows` : null,
+            dataState: view
+              ? { ...summarizeProvenance([view]), classification }
+              : emptyDataState("MISSING"),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
           url.pathname === "/api/fundamentals"
         ) {
           const symbol = (url.searchParams.get("symbol") ?? "").toUpperCase();
@@ -1069,34 +1473,54 @@ export function createApiServer(config: ApiConfig): ApiHandle {
         if (request.method === "GET" && url.pathname === "/api/screener") {
           const namespace =
             url.searchParams.get("provider") ?? providerId;
+          const data = await screenerData(namespace);
+          // Freshness depends on the clock, so provenance is attached per request.
           const views: ProvenanceView[] = [];
-          const rows = store
-            .getSymbolsWithCandles(namespace)
-            .map((symbol) => {
-              const entries = store.getCandlesWithProvenance({
-                providerId: namespace,
-                kind: "equity",
-                symbol,
-              });
-              const latest = entries.at(-1);
-              if (!latest) return null;
-              const view = provenanceView(
-                latest.provenance,
-                "dailyOhlc",
-                latest.data.timestamp,
-              );
-              views.push(view);
-              return {
-                ...screenCandles(entries.map((entry) => entry.data)),
-                provenance: view,
-              };
-            })
-            .filter((row) => row !== null);
+          const rows = data.entries.map((entry) => {
+            const view = provenanceView(entry.provenance, "dailyOhlc", entry.asOf);
+            views.push(view);
+            return { ...entry.row, provenance: view };
+          });
           sendJson(response, 200, {
             providerId: namespace,
-            generatedAt: new Date().toISOString(),
+            generatedAt: data.generatedAt,
             rows,
             dataState: summarizeProvenance(views),
+          });
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/signals") {
+          const lookback = integerParam(
+            url.searchParams.get("lookback"),
+            SCREENER_EVENT_LOOKBACK,
+            1,
+            SIGNAL_MAX_LOOKBACK,
+          );
+          if (lookback === null) {
+            sendJson(response, 400, {
+              error: `lookback must be an integer between 1 and ${SIGNAL_MAX_LOOKBACK}`,
+            });
+            return;
+          }
+          const namespace =
+            url.searchParams.get("provider") ?? providerId;
+          const data = await screenerData(namespace);
+          // The last `lookback` MARKET sessions: a symbol whose own last
+          // sessions are weeks old does not surface old events as recent.
+          const cutoff =
+            data.sessions[Math.min(lookback, data.sessions.length) - 1] ?? null;
+          sendJson(response, 200, {
+            providerId: namespace,
+            generatedAt: data.generatedAt,
+            latestSession: data.sessions[0] ?? null,
+            lookback,
+            events:
+              cutoff === null
+                ? []
+                : data.signals.filter(
+                    (event) => event.timestamp.slice(0, 10) >= cutoff,
+                  ),
           });
           return;
         }
@@ -1440,6 +1864,7 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             });
           } finally {
             syncInFlight = false;
+            invalidateScreener();
           }
           return;
         }

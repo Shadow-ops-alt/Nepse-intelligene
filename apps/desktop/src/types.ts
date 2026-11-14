@@ -276,6 +276,35 @@ export interface ScreenerRow {
     | "strong-bearish"
     | null;
   provenance: Provenance;
+  /** Calendar 7 / 14-day returns (percent); base = last close on/before the cutoff. */
+  return1W?: number | null;
+  return2W?: number | null;
+  lastVolume?: number | null;
+  /** Mean volume of the 20 sessions BEFORE the last one (averageVolume20 includes it). */
+  avgVolume20?: number | null;
+  volume3d?: number | null;
+  volume3dRatio?: number | null;
+  volume5d?: number | null;
+  turnover5d?: number | null;
+  priceChange3d?: number | null;
+  upDays3?: number;
+  volumeBreakout?: boolean;
+  /** Mean absolute daily move of the last 20 sessions, percent. */
+  avgAbsMove20?: number | null;
+  supertrendDir?: 1 | -1 | null;
+  adx14?: number | null;
+  /** RSI 14 of the previous session. */
+  rsiPrev?: number | null;
+  /** Signal events of the last 5 sessions of this series, oldest first. */
+  events?: Array<{
+    id: string;
+    index: number;
+    timestamp: string;
+    type: string;
+    direction: "bullish" | "bearish" | "neutral";
+    label: string;
+    detail: string;
+  }>;
 }
 
 export interface ScreenerResponse {

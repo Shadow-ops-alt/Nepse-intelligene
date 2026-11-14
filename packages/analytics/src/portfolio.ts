@@ -1,6 +1,14 @@
 import type { Candle } from "@stock/core";
-import { analyzeCandles } from "./analysis";
+import { analyzeCandles, rsi } from "./analysis";
 import { quantProfile, type PatternBias, type SignalRating } from "./quant";
+import {
+  adx,
+  averageAbsoluteMove,
+  signalEvents,
+  supertrend,
+  volumeAnalysis,
+  type SignalEvent,
+} from "./technicals";
 
 export type TradeSide = "buy" | "sell";
 
@@ -63,6 +71,40 @@ interface WorkingPosition {
 function round(value: number, decimals = 2): number {
   const factor = 10 ** decimals;
   return Math.round(value * factor) / factor;
+}
+
+function roundOrNull(
+  value: number | null | undefined,
+  decimals = 2,
+): number | null {
+  return value === null || value === undefined || !Number.isFinite(value)
+    ? null
+    : round(value, decimals);
+}
+
+const DAY_MS = 86_400_000;
+
+function dayMs(candle: Candle): number {
+  return Date.parse(`${candle.timestamp.slice(0, 10)}T00:00:00Z`);
+}
+
+/**
+ * Percent return over a calendar window, as quant.periodReturns computes it:
+ * the base is the last stored close on or before (last session − days). When
+ * the series does not reach back that far the result is null; nothing is
+ * interpolated or shortened. `sorted` must be ascending.
+ */
+function calendarReturn(sorted: Candle[], days: number): number | null {
+  const last = sorted.at(-1);
+  if (!last || !(last.close > 0)) return null;
+  const cutoff = dayMs(last) - days * DAY_MS;
+  for (let index = sorted.length - 1; index >= 0; index -= 1) {
+    const candle = sorted[index]!;
+    if (dayMs(candle) <= cutoff) {
+      return candle.close > 0 ? round((last.close / candle.close - 1) * 100) : null;
+    }
+  }
+  return null;
 }
 
 function sortedTrades(trades: TradeInput[]): TradeInput[] {
@@ -271,13 +313,56 @@ export interface ScreenerRow {
   patterns: Array<{ id: string; name: string; bias: PatternBias }>;
   signalScore: number | null;
   signalRating: SignalRating | null;
+  /** Calendar 7 / 14-day returns (percent); null when history is too short. */
+  return1W: number | null;
+  return2W: number | null;
+  /** Volume of the last stored session. */
+  lastVolume: number | null;
+  /**
+   * Mean volume of the 20 sessions BEFORE the last one (unlike
+   * `averageVolume20`, which includes the last session).
+   */
+  avgVolume20: number | null;
+  /** Sum of the last 3 sessions' volume. */
+  volume3d: number | null;
+  /** volume3d ÷ the average 3-session volume of the 20 sessions before them. */
+  volume3dRatio: number | null;
+  /** Sum of the last 5 sessions' volume. */
+  volume5d: number | null;
+  /** Turnover of the last 5 sessions (reported turnover, else close × volume). */
+  turnover5d: number | null;
+  /** Percent change from the close 3 sessions ago to the last close. */
+  priceChange3d: number | null;
+  /** Of the last 3 sessions, how many closed above the previous close. */
+  upDays3: number;
+  /** Close above the prior 20-session high on ≥ 1.5 × avgVolume20. */
+  volumeBreakout: boolean;
+  /** Mean absolute close-to-close move of the last 20 sessions, percent. */
+  avgAbsMove20: number | null;
+  /** Supertrend (10, 3) direction on the last session: 1 up, −1 down. */
+  supertrendDir: 1 | -1 | null;
+  /** Wilder ADX 14 on the last session. */
+  adx14: number | null;
+  /** RSI 14 of the session before the last one. */
+  rsiPrev: number | null;
+  /** Technical events of the last `signalLookback` sessions, oldest first. */
+  events: SignalEvent[];
+}
+
+export interface ScreenOptions {
+  /** Sessions of signal events to report in `events` (default 5). */
+  signalLookback?: number;
 }
 
 /**
  * Extends the shared indicators with screener-specific rollups. Kept pure so
  * the same function works in the API, tests, and a future export.
  */
-export function screenCandles(candles: Candle[]): ScreenerRow {
+export function screenCandles(
+  candles: Candle[],
+  options: ScreenOptions = {},
+): ScreenerRow {
+  const signalLookback = options.signalLookback ?? 5;
   const sorted = [...candles].sort((a, b) =>
     a.timestamp.localeCompare(b.timestamp),
   );
@@ -304,6 +389,12 @@ export function screenCandles(candles: Candle[]): ScreenerRow {
   }
 
   const quant = quantProfile(sorted);
+  const volume = volumeAnalysis(sorted);
+  const rsiSeries = rsi(
+    sorted.map((candle) => candle.close),
+    14,
+  );
+  const direction = supertrend(sorted, 10, 3).direction.at(-1) ?? null;
 
   return {
     ...analysis,
@@ -350,5 +441,21 @@ export function screenCandles(candles: Candle[]): ScreenerRow {
     patterns: quant.lastPatterns.map(({ id, name, bias }) => ({ id, name, bias })),
     signalScore: quant.signals?.score ?? null,
     signalRating: quant.signals?.rating ?? null,
+    return1W: calendarReturn(sorted, 7),
+    return2W: calendarReturn(sorted, 14),
+    lastVolume: volume.lastVolume,
+    avgVolume20: roundOrNull(volume.avgVolume20, 0),
+    volume3d: roundOrNull(volume.volume3d),
+    volume3dRatio: roundOrNull(volume.volume3dRatio),
+    volume5d: roundOrNull(volume.volume5d),
+    turnover5d: roundOrNull(volume.turnover5d),
+    priceChange3d: roundOrNull(volume.priceChange3d),
+    upDays3: volume.upDays3,
+    volumeBreakout: volume.breakout,
+    avgAbsMove20: roundOrNull(averageAbsoluteMove(sorted, 20)),
+    supertrendDir: direction,
+    adx14: roundOrNull(adx(sorted, 14).adx.at(-1)),
+    rsiPrev: roundOrNull(rsiSeries.at(-2)),
+    events: signalEvents(sorted, signalLookback),
   };
 }
