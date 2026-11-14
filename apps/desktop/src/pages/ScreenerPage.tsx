@@ -465,8 +465,17 @@ export function ScreenerPage({
           </label>
           <label title="Large = top 10% by market cap, High = next 20%, Mid = next 30%, Low = bottom 40%">
             <span>Market cap</span>
-            <select value={capClass} onChange={(event) => setCapClass(event.target.value as "all" | CapClass)}>
-              <option value="all">All sizes</option>
+            <select
+              value={capClass}
+              disabled={caps.values.size === 0}
+              title={
+                caps.values.size === 0
+                  ? "No market caps yet: shares outstanding comes from company profiles (run pnpm personal:details, then sync)"
+                  : undefined
+              }
+              onChange={(event) => setCapClass(event.target.value as "all" | CapClass)}
+            >
+              <option value="all">{caps.values.size === 0 ? "No market-cap data" : "All sizes"}</option>
               <option value="Large">Large cap (top 10%)</option>
               <option value="High">High cap (next 20%)</option>
               <option value="Mid">Mid cap (next 30%)</option>

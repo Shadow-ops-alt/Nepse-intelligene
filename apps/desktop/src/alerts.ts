@@ -354,8 +354,18 @@ export function useAlerts(enabled = true) {
     if (fresh.length === 0) return;
     for (const alert of fresh) seen.add(alert.key);
     writeList(SEEN_KEY, [...seen].slice(-5000));
-    // First launch ever: record the backlog silently instead of a burst.
-    if (previous.length > 0) void notify(fresh);
+    // First launch ever: record the backlog silently (seen and read) instead
+    // of a notification burst and a 99+ badge; only new alerts count after.
+    if (previous.length > 0) {
+      void notify(fresh);
+    } else {
+      setRead((current) => {
+        const next = new Set(current);
+        for (const alert of fresh) next.add(alert.key);
+        writeList(READ_KEY, [...next].slice(-5000));
+        return next;
+      });
+    }
   }, [triggered, signals]);
 
   const setRules = useCallback((next: AlertRule[]) => {

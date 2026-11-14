@@ -135,6 +135,18 @@ describe("PersonalStore", () => {
       );
       expect(db.latestMarketAsOf("licensed-vendor")).toBeNull();
       expect(db.latestMarketAsOf()).toBe("2026-11-03T09:15:00.000Z");
+
+      // A later news snapshot (stamped with its fetch time) must not move the
+      // market session forward.
+      db.upsertSnapshot(
+        "news",
+        "latest",
+        {
+          data: [{ title: "fetched on a weekend" }],
+          meta: createMeta({ descriptor: personal, asOf: "2026-11-07T10:00:00.000Z" }),
+        },
+      );
+      expect(db.latestMarketAsOf("free-source")).toBe("2026-11-03T09:15:00.000Z");
     } finally {
       db.close();
     }

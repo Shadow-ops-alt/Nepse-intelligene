@@ -899,6 +899,11 @@ export class PersonalStore {
    * The newest market timestamp actually stored, not the time of the last
    * import. A successful import of old files must not look like fresh data.
    */
+  /**
+   * Newest stored *price* timestamp (candles and quotes). Snapshots are left
+   * out on purpose: news, IPO lists and profiles carry their fetch time, and a
+   * fresh news fetch on a weekend must not make the last session look current.
+   */
   latestMarketAsOf(providerId?: string): string | null {
     const filter = providerId ? "WHERE provider_id = ?" : "";
     const params = providerId ? [providerId] : [];
@@ -907,7 +912,6 @@ export class PersonalStore {
         `SELECT MAX(as_of) AS latest FROM (
            SELECT provider_id, as_of FROM candles WHERE as_of IS NOT NULL
            UNION ALL SELECT provider_id, as_of FROM quotes WHERE as_of IS NOT NULL
-           UNION ALL SELECT provider_id, as_of FROM snapshots WHERE as_of IS NOT NULL
          ) ${filter}`,
       )
       .get(...params);
