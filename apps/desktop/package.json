@@ -47,6 +47,12 @@
     "directories": {
       "output": "release"
     },
+    "extraResources": [
+      {
+        "from": "resources/personal.db.gz",
+        "to": "starter/personal.db.gz"
+      }
+    ],
     "linux": {
       "target": [
         "AppImage"
@@ -57,8 +63,26 @@
     },
     "win": {
       "target": [
-        "nsis"
-      ]
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "NEPSE-Terminal-${version}-${arch}-setup.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "NEPSE Terminal",
+      "deleteAppDataOnUninstall": false,
+      "runAfterFinish": true
     },
     "mac": {
       "target": [

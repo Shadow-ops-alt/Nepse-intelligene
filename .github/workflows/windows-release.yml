@@ -1,0 +1,81 @@
+name: Windows release
+
+# Manually triggered build of the Windows x64 NSIS installer.
+# Nothing is published automatically; the installer is uploaded as an artifact.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-windows:
+    name: Windows x64 NSIS installer
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Enable pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies from the lockfile
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify bundled starter database
+        run: node --experimental-sqlite scripts/verify-starter-db.mjs apps/desktop/resources/personal.db.gz
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build renderer and API bundle
+        run: |
+          pnpm build:web
+          pnpm --filter @stock/desktop electron:server
+
+      - name: Rebuild native dependencies for Electron
+        run: pnpm --filter @stock/desktop exec electron-builder install-app-deps
+
+      - name: Package Windows x64 NSIS installer
+        run: pnpm --filter @stock/desktop exec electron-builder --win nsis --x64 --publish never
+
+      - name: Check installer and bundled starter database
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem apps/desktop/release/*.exe -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $installer) { throw "No installer was produced." }
+
+          $packaged = "apps/desktop/release/win-unpacked/resources/starter/personal.db.gz"
+          $source = "apps/desktop/resources/personal.db.gz"
+          if (-not (Test-Path $packaged)) {
+            throw "Starter database is missing from the packaged application."
+          }
+          if ((Get-FileHash $packaged).Hash -ne (Get-FileHash $source).Hash) {
+            throw "Packaged starter database does not match the repository copy."
+          }
+
+          Write-Host "Installer: $($installer.FullName)"
+          Write-Host "Size: $([math]::Round($installer.Length / 1MB, 1)) MB"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: NEPSE-Terminal-Windows-x64
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+          if-no-files-found: error
+          retention-days: 30
