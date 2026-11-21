@@ -29,6 +29,7 @@ import {
   Notice,
   RangeBar,
   RatingGauge,
+  Segmented,
   Spinner,
   Stat,
   Tabs,
@@ -41,8 +42,11 @@ import {
   type Overlay,
   type Study,
 } from "../components/PriceChart";
+import { LiveIntradayChart } from "../components/LiveIntradayChart";
+import { TIMEFRAME_OPTIONS, type ChartTimeframe } from "../live/types";
 import { Icon } from "../components/icons";
 import { CompanyDetail } from "../fundamentals/CompanyDetail";
+import { nptDate } from "../lib";
 
 const COMPANY_OVERLAYS: Overlay[] = ["sma20", "sma50", "sma200"];
 const COMPANY_STUDIES: Study[] = ["volume", "rsi"];
@@ -87,6 +91,7 @@ export function CompanyPage({
   const newsState = useApi<NewsResponse>("/api/news");
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<DetailTab>("performance");
+  const [timeframe, setTimeframe] = useState<ChartTimeframe>("1D");
 
   const candles = candlesState.data?.candles ?? [];
   const analysis = analysisState.data?.analysis ?? null;
@@ -310,35 +315,62 @@ export function CompanyPage({
           <div className="grid main-side">
             <Card
               title="Price"
-              subtitle={`${candles[0]?.timestamp.slice(0, 10)} → ${last?.timestamp.slice(0, 10)} · ${candles.length.toLocaleString()} sessions`}
+              subtitle={
+                timeframe === "1D"
+                  ? `${candles[0]?.timestamp.slice(0, 10)} → ${last?.timestamp.slice(0, 10)} · ${candles.length.toLocaleString()} sessions`
+                  : `Live session ${nptDate(new Date().toISOString()) ?? ""} · sampled while the app is open`
+              }
+              action={
+                <Segmented
+                  label="Chart timeframe"
+                  value={timeframe}
+                  onChange={setTimeframe}
+                  items={TIMEFRAME_OPTIONS}
+                />
+              }
               footer={
-                <div className="row" style={{ gap: 14 }}>
-                  <AsOf value={provenance?.asOf} ageSeconds={provenance?.ageSeconds} />
-                  {provenance && (
+                timeframe === "1D" ? (
+                  <div className="row" style={{ gap: 14 }}>
+                    <AsOf value={provenance?.asOf} ageSeconds={provenance?.ageSeconds} />
+                    {provenance && (
+                      <span>
+                        source {provenance.sourceType} · terms {provenance.termsStatus} ·
+                        fetched {provenance.fetchedAt.slice(0, 16).replace("T", " ")}
+                      </span>
+                    )}
+                    {unadjusted && (
+                      <span>
+                        Prices are unadjusted for bonus/rights; long-window indicators
+                        can show artificial drops.
+                      </span>
+                    )}
+                  </div>
+                ) : (
+                  <div className="row" style={{ gap: 14 }}>
+                    <Badge tone="warn">UNVERIFIED</Badge>
                     <span>
-                      source {provenance.sourceType} · terms {provenance.termsStatus} ·
-                      fetched {provenance.fetchedAt.slice(0, 16).replace("T", " ")}
+                      Sampled from the unofficial live feed while the app is open.
+                      Intraday history before the chart opened is not available;
+                      end-of-day history is under 1D.
                     </span>
-                  )}
-                  {unadjusted && (
-                    <span>
-                      Prices are unadjusted for bonus/rights; long-window indicators
-                      can show artificial drops.
-                    </span>
-                  )}
-                </div>
+                  </div>
+                )
               }
             >
-              <PriceChart
-                candles={candles}
-                size="tall"
-                defaultRange="1Y"
-                defaultOverlays={COMPANY_OVERLAYS}
-                defaultStudies={COMPANY_STUDIES}
-                defaultAnalysis={COMPANY_ANALYSIS}
-                markers={markers}
-                drawingKey={`equity:${symbol}`}
-              />
+              {timeframe === "1D" ? (
+                <PriceChart
+                  candles={candles}
+                  size="tall"
+                  defaultRange="1Y"
+                  defaultOverlays={COMPANY_OVERLAYS}
+                  defaultStudies={COMPANY_STUDIES}
+                  defaultAnalysis={COMPANY_ANALYSIS}
+                  markers={markers}
+                  drawingKey={`equity:${symbol}`}
+                />
+              ) : (
+                <LiveIntradayChart symbol={symbol} timeframe={timeframe} height="tall" />
+              )}
             </Card>
 
             <div className="stack">

@@ -26,6 +26,7 @@ import {
   EmptyState,
   MiniStats,
   RatingBadge,
+  Segmented,
   SortHeader,
   Sparkline,
   Spinner,
@@ -36,6 +37,8 @@ import {
   useSort,
 } from "../components/ui";
 import { PriceChart, type Overlay, type Study } from "../components/PriceChart";
+import { LiveIntradayChart } from "../components/LiveIntradayChart";
+import { TIMEFRAME_OPTIONS, type ChartTimeframe } from "../live/types";
 
 const INDEX_OVERLAYS: Overlay[] = ["sma50", "sma200"];
 const INDEX_STUDIES: Study[] = [];
@@ -72,6 +75,7 @@ export function MarketPage({
   const watchState = useApi<{ symbols: string[] }>("/api/watchlist");
   const [sectorFilter, setSectorFilter] = useState<string | null>(null);
   const [search, setSearch] = useState("");
+  const [indexTimeframe, setIndexTimeframe] = useState<ChartTimeframe>("1D");
 
   const companies = companiesState.data?.companies ?? [];
   const summary = summaryState.data?.summary ?? null;
@@ -400,27 +404,55 @@ export function MarketPage({
         <Card
           title={`${currentIndex?.name ?? "NEPSE Index"}`}
           subtitle={
-            indexHistory.length > 1
-              ? `${indexHistory[0]?.timestamp.slice(0, 10)} → ${indexHistory.at(-1)?.timestamp.slice(0, 10)} · ${indexHistory.length.toLocaleString()} sessions · end-of-day`
-              : "end-of-day index history"
+            indexTimeframe === "1D"
+              ? indexHistory.length > 1
+                ? `${indexHistory[0]?.timestamp.slice(0, 10)} → ${indexHistory.at(-1)?.timestamp.slice(0, 10)} · ${indexHistory.length.toLocaleString()} sessions · end-of-day`
+                : "end-of-day index history"
+              : `Live session ${nptDate(new Date().toISOString()) ?? ""} · sampled while the app is open`
           }
           action={
-            indexProvenance ? (
-              <DataStateBadge
-                state={indexProvenance.state}
-                classification={indexProvenance.classification}
+            <div className="row" style={{ gap: 8 }}>
+              <Segmented
+                label="Index chart timeframe"
+                value={indexTimeframe}
+                onChange={setIndexTimeframe}
+                items={TIMEFRAME_OPTIONS}
               />
-            ) : undefined
+              {indexProvenance && (
+                <DataStateBadge
+                  state={indexProvenance.state}
+                  classification={indexProvenance.classification}
+                />
+              )}
+            </div>
           }
           footer={
-            <>
-              Index level from stored end-of-day history. Share volume is not
-              published for the index. Returns, volatility and drawdown are
-              derived from these closes.
-            </>
+            indexTimeframe === "1D" ? (
+              <>
+                Index level from stored end-of-day history. Share volume is not
+                published for the index. Returns, volatility and drawdown are
+                derived from these closes.
+              </>
+            ) : (
+              <div className="row" style={{ gap: 14 }}>
+                <Badge tone="warn">UNVERIFIED</Badge>
+                <span>
+                  Sampled from the unofficial live feed while the app is open.
+                  Intraday history before the chart opened is not available;
+                  end-of-day history is under 1D.
+                </span>
+              </div>
+            )
           }
         >
-          {indexHistoryState.loading ? (
+          {indexTimeframe !== "1D" ? (
+            <LiveIntradayChart
+              symbol="NEPSE"
+              source="index"
+              timeframe={indexTimeframe}
+              showVolume={false}
+            />
+          ) : indexHistoryState.loading ? (
             <Spinner label="Loading index history" />
           ) : indexHistory.length > 1 ? (
             <div className="stack">

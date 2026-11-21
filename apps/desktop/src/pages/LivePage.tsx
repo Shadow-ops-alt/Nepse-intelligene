@@ -2,6 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { formatCompact, formatNumber } from "../api";
 import { useApi } from "../hooks";
 import type { CompaniesResponse } from "../types";
+import type {
+  LiveDepth,
+  LiveMarket,
+  LiveQuote,
+  LiveStatus,
+  LiveSummary,
+} from "../live/types";
 import {
   Badge,
   Card,
@@ -14,58 +21,6 @@ import {
   Stat,
   useSort,
 } from "../components/ui";
-
-interface LiveStatus {
-  enabled: boolean;
-  source: string;
-  marketOpen: boolean | null;
-  asOf: string | null;
-  lastError: string | null;
-  disclaimer: string;
-}
-
-interface LiveQuote {
-  symbol: string;
-  securityName?: string;
-  ltp: number;
-  previousClose: number | null;
-  change: number | null;
-  changePercent: number | null;
-  open: number | null;
-  high: number | null;
-  low: number | null;
-  volume: number | null;
-  turnover: number | null;
-  lastTradedAt: string | null;
-}
-
-interface LiveMarket {
-  enabled: boolean;
-  marketOpen: boolean | null;
-  asOf: string | null;
-  rows: LiveQuote[];
-  lastError: string | null;
-}
-
-interface LiveSummary {
-  enabled: boolean;
-  asOf: string | null;
-  index: { value: number; change: number | null; changePercent: number | null } | null;
-  turnover: number | null;
-  sharesTraded: number | null;
-  transactions: number | null;
-  scripsTraded: number | null;
-  lastError: string | null;
-}
-
-interface LiveDepth {
-  enabled: boolean;
-  asOf: string | null;
-  symbol: string;
-  bids: Array<{ price: number; quantity: number; orders?: number }>;
-  asks: Array<{ price: number; quantity: number; orders?: number }>;
-  lastError: string | null;
-}
 
 type SortKey = "symbol" | "ltp" | "changePercent" | "volume" | "turnover";
 
