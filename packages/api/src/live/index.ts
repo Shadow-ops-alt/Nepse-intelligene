@@ -8,6 +8,7 @@ export {
   createLiveService,
   liveEnabledFromEnv,
   type LiveDepthResponse,
+  type LiveIntradayResponse,
   type LiveMarketResponse,
   type LiveService,
   type LiveServiceOptions,

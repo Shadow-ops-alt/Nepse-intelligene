@@ -11,10 +11,12 @@ import {
   CapabilitySchema,
   classificationForSourceType,
   computeDataState,
+  createMeta,
   ageInSeconds,
   freshnessRuleFor,
   policyFromEnv,
   type Capability,
+  type Candle,
   type DataEdition,
   type DataState,
   type MarketDataProvider,
@@ -30,7 +32,7 @@ import {
   type TradeInput,
 } from "@stock/analytics";
 import { syncPersonalData } from "@stock/personal";
-import { createLiveService, liveEnabledFromEnv } from "./live";
+import { createLiveService, liveEnabledFromEnv, LIVE_DISCLAIMER, LIVE_SOURCE } from "./live";
 import { parseCsvRecords } from "./csv";
 
 export interface ApiConfig {
@@ -529,6 +531,46 @@ export function createApiServer(config: ApiConfig): ApiHandle {
       liveEnabledFromEnv(env) &&
       ((policy.edition ?? "licensed") === "free" || policy.allowUnofficial),
   });
+
+  /**
+   * Persist the latest-session intraday bars. They go to their own table so
+   * the end-of-day series, screeners and indicators never see minute bars.
+   */
+  const rememberIntraday = (
+    feed: Awaited<ReturnType<typeof live.intraday>>,
+  ): number => {
+    if (!provider || feed.series.length === 0) {
+      return 0;
+    }
+    const candles: Candle[] = [];
+    for (const series of feed.series) {
+      for (const bar of series.bars) {
+        candles.push({
+          symbol: feed.symbol,
+          timeframe: series.timeframe as Candle["timeframe"],
+          timestamp: bar.timestamp,
+          open: bar.open,
+          high: bar.high,
+          low: bar.low,
+          close: bar.close,
+          volume: bar.volume ?? 0,
+          ...(bar.turnover !== null ? { turnover: bar.turnover } : {}),
+          adjusted: false,
+        });
+      }
+    }
+    if (candles.length === 0) return 0;
+    const rule = freshnessRuleFor("intradayOhlc");
+    const meta = createMeta({
+      descriptor: provider.descriptor,
+      ...(feed.asOf ? { asOf: feed.asOf } : {}),
+      maxAgeSeconds: rule.maxAgeSeconds,
+      stateMode: rule.mode,
+      warnings: feed.lastError ? [feed.lastError] : undefined,
+    });
+    store.upsertIntradayCandles({ data: candles, meta }, feed.kind);
+    return candles.length;
+  };
   let syncInFlight = false;
   const readCompanyEvents = createCompanyEventsReader(config.dataDir);
   const sourceClassification = () =>
@@ -1437,6 +1479,68 @@ export function createApiServer(config: ApiConfig): ApiHandle {
           return;
         }
 
+        if (request.method === "GET" && url.pathname === "/api/intraday") {
+          const symbol = url.searchParams.get("symbol");
+          if (!symbol) {
+            sendJson(response, 400, { error: "symbol is required" });
+            return;
+          }
+          const kind =
+            url.searchParams.get("kind") === "index" ? "index" : "equity";
+          const timeframe = url.searchParams.get("timeframe") ?? "1min";
+          const session = url.searchParams.get("session") ?? undefined;
+          const refresh = url.searchParams.get("refresh") !== "0";
+
+          let feed: Awaited<ReturnType<typeof live.intraday>> | null = null;
+          if (refresh) {
+            feed = await live.intraday(symbol, kind);
+            if (feed.series.length > 0) rememberIntraday(feed);
+          }
+
+          const candles = store.getIntradayCandles({
+            providerId,
+            kind,
+            symbol,
+            timeframe,
+            ...(session ? { session } : {}),
+            limit: 2_000,
+          });
+          const sessions = store.listIntradaySessions(providerId, kind, symbol);
+          const summary = store.getIntradaySummary(
+            providerId,
+            kind,
+            symbol,
+            timeframe,
+          );
+          sendJson(response, 200, {
+            providerId,
+            symbol: symbol.toUpperCase(),
+            kind,
+            timeframe,
+            session: session ?? feed?.session ?? sessions[0] ?? null,
+            sessions,
+            points: feed?.points ?? summary.count,
+            asOf: summary.asOf,
+            fetchedAt: summary.fetchedAt,
+            candles,
+            live: feed
+              ? {
+                  enabled: feed.enabled,
+                  asOf: feed.asOf,
+                  fetchedAt: feed.fetchedAt,
+                  points: feed.points,
+                  lastError: feed.lastError,
+                }
+              : null,
+            source: feed?.source ?? LIVE_SOURCE,
+            disclaimer: feed?.disclaimer ?? LIVE_DISCLAIMER,
+            classification: "UNVERIFIED",
+            note:
+              "Latest-session price points from NEPSE's unofficial graph endpoint, resampled into bars. The source publishes no volume, so volume is zero and bars exist only where the price changed.",
+          });
+          return;
+        }
+
         if (request.method === "GET" && url.pathname === "/api/candles") {
           const symbol = url.searchParams.get("symbol");
           if (!symbol) {
@@ -1451,6 +1555,7 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             providerId: namespace,
             kind,
             symbol,
+            timeframe: url.searchParams.get("timeframe") ?? "1day",
             ...(url.searchParams.get("from")
               ? { from: url.searchParams.get("from")! }
               : {}),

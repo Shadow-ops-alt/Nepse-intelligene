@@ -23,6 +23,22 @@ export interface CandleQuery {
   to?: string;
 }
 
+export interface IntradayQuery {
+  providerId: string;
+  kind: SeriesKind;
+  symbol: string;
+  timeframe?: string;
+  session?: string;
+  from?: string;
+  to?: string;
+  limit?: number;
+}
+
+export interface StoredIntradayCandle extends Candle {
+  /** Nepal-Time session date, `YYYY-MM-DD`. */
+  sessionDate: string;
+}
+
 export interface StoreSummary {
   providerId: string | null;
   companies: number;
@@ -323,6 +339,39 @@ export class PersonalStore {
       `);
       this.recordMigration(3);
     }
+
+    if (!applied.has(4)) {
+      // Intraday bars live apart from the end-of-day `candles` table: every
+      // screener, indicator and analysis pass must keep reading one daily row
+      // per session, never a mixture of daily and minute bars.
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS intraday_candles (
+          provider_id TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('equity', 'index')),
+          symbol TEXT NOT NULL,
+          timeframe TEXT NOT NULL,
+          session_date TEXT NOT NULL,
+          timestamp TEXT NOT NULL,
+          open REAL NOT NULL,
+          high REAL NOT NULL,
+          low REAL NOT NULL,
+          close REAL NOT NULL,
+          volume REAL NOT NULL DEFAULT 0,
+          turnover REAL,
+          trades INTEGER,
+          source_type TEXT NOT NULL,
+          terms_status TEXT NOT NULL,
+          production_ready INTEGER NOT NULL,
+          classification TEXT NOT NULL DEFAULT 'UNVERIFIED',
+          fetched_at TEXT NOT NULL,
+          PRIMARY KEY (provider_id, kind, symbol, timeframe, timestamp)
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_intraday_series
+          ON intraday_candles (provider_id, kind, symbol, session_date, timeframe);
+      `);
+      this.recordMigration(4);
+    }
   }
 
   private recordMigration(version: number): void {
@@ -612,16 +661,17 @@ export class PersonalStore {
     providerId: string,
     symbol: string,
     kind: SeriesKind = "equity",
+    timeframe: string = "1day",
   ): { candles: Candle[]; latest: Provenanced<{ close: number; timestamp: string }> | null } {
     const candles = this.db
       .prepare(
         `SELECT symbol, timeframe, timestamp, open, high, low, close, volume,
                 turnover, trades, adjusted, adjustment_factor
          FROM candles
-         WHERE provider_id = ? AND kind = ? AND symbol = ?
+         WHERE provider_id = ? AND kind = ? AND symbol = ? AND timeframe = ?
          ORDER BY timestamp`,
       )
-      .all(providerId, kind, symbol.toUpperCase())
+      .all(providerId, kind, symbol.toUpperCase(), timeframe)
       .map(candleFromRow);
     return {
       candles,
@@ -629,6 +679,164 @@ export class PersonalStore {
         candles.length > 0
           ? this.getLatestCandleWithProvenance(providerId, symbol, kind)
           : null,
+    };
+  }
+
+  /** Store intraday bars; one row per (symbol, timeframe, timestamp). */
+  upsertIntradayCandles(
+    envelope: DataEnvelope<Candle[]>,
+    kind: SeriesKind,
+  ): number {
+    const p = provenance(envelope);
+    const statement = this.db.prepare(`
+      INSERT INTO intraday_candles (
+        provider_id, kind, symbol, timeframe, session_date, timestamp, open,
+        high, low, close, volume, turnover, trades, source_type, terms_status,
+        production_ready, classification, fetched_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT (provider_id, kind, symbol, timeframe, timestamp)
+      DO UPDATE SET
+        session_date = excluded.session_date,
+        open = excluded.open,
+        high = excluded.high,
+        low = excluded.low,
+        close = excluded.close,
+        volume = excluded.volume,
+        turnover = excluded.turnover,
+        trades = excluded.trades,
+        source_type = excluded.source_type,
+        terms_status = excluded.terms_status,
+        production_ready = excluded.production_ready,
+        classification = excluded.classification,
+        fetched_at = excluded.fetched_at
+    `);
+
+    for (const candle of envelope.data) {
+      statement.run(
+        p.providerId,
+        kind,
+        candle.symbol.toUpperCase(),
+        candle.timeframe,
+        candle.timestamp.slice(0, 10),
+        candle.timestamp,
+        candle.open,
+        candle.high,
+        candle.low,
+        candle.close,
+        candle.volume,
+        candle.turnover ?? null,
+        candle.trades ?? null,
+        p.sourceType,
+        p.termsStatus,
+        p.productionReady ? 1 : 0,
+        p.classification,
+        p.fetchedAt,
+      );
+    }
+    return envelope.data.length;
+  }
+
+  getIntradayCandles(query: IntradayQuery): StoredIntradayCandle[] {
+    const clauses = [
+      "provider_id = ?",
+      "kind = ?",
+      "symbol = ?",
+    ];
+    const params: Array<string | number> = [
+      query.providerId,
+      query.kind,
+      query.symbol.toUpperCase(),
+    ];
+    if (query.timeframe) {
+      clauses.push("timeframe = ?");
+      params.push(query.timeframe);
+    }
+    if (query.session) {
+      clauses.push("session_date = ?");
+      params.push(query.session);
+    }
+    if (query.from) {
+      clauses.push("substr(timestamp, 1, 10) >= ?");
+      params.push(query.from);
+    }
+    if (query.to) {
+      clauses.push("substr(timestamp, 1, 10) <= ?");
+      params.push(query.to);
+    }
+
+    let sql = `SELECT * FROM intraday_candles
+               WHERE ${clauses.join(" AND ")}
+               ORDER BY timestamp`;
+    if (query.limit !== undefined && Number.isFinite(query.limit)) {
+      sql = `SELECT * FROM (
+               SELECT * FROM intraday_candles
+               WHERE ${clauses.join(" AND ")}
+               ORDER BY timestamp DESC
+               LIMIT ${Math.max(1, Math.floor(query.limit))}
+             ) ORDER BY timestamp`;
+    }
+
+    return this.db
+      .prepare(sql)
+      .all(...params)
+      .map((row) => ({
+        ...candleFromRow(row),
+        sessionDate: String(row.session_date),
+      }));
+  }
+
+  /** Distinct stored intraday sessions for one series, newest first. */
+  listIntradaySessions(
+    providerId: string,
+    kind: SeriesKind,
+    symbol: string,
+  ): string[] {
+    return this.db
+      .prepare(
+        `SELECT DISTINCT session_date FROM intraday_candles
+         WHERE provider_id = ? AND kind = ? AND symbol = ?
+         ORDER BY session_date DESC`,
+      )
+      .all(providerId, kind, symbol.toUpperCase())
+      .map((row) => String(row.session_date));
+  }
+
+  countIntraday(providerId: string): number {
+    const row = this.db
+      .prepare(
+        "SELECT COUNT(*) AS n FROM intraday_candles WHERE provider_id = ?",
+      )
+      .get(providerId);
+    return Number(row?.n ?? 0);
+  }
+
+  /** Newest stored intraday timestamp and import time for one series. */
+  getIntradaySummary(
+    providerId: string,
+    kind: SeriesKind,
+    symbol: string,
+    timeframe?: string,
+  ): { asOf: string | null; fetchedAt: string | null; count: number } {
+    const row = this.db
+      .prepare(
+        `SELECT MAX(timestamp) AS as_of, MAX(fetched_at) AS fetched_at,
+                COUNT(*) AS n
+         FROM intraday_candles
+         WHERE provider_id = ? AND kind = ? AND symbol = ?
+           ${timeframe ? "AND timeframe = ?" : ""}`,
+      )
+      .get(
+        ...(timeframe
+          ? [providerId, kind, symbol.toUpperCase(), timeframe]
+          : [providerId, kind, symbol.toUpperCase()]),
+      );
+    return {
+      asOf: row?.as_of === null || row?.as_of === undefined ? null : String(row.as_of),
+      fetchedAt:
+        row?.fetched_at === null || row?.fetched_at === undefined
+          ? null
+          : String(row.fetched_at),
+      count: Number(row?.n ?? 0),
     };
   }
 

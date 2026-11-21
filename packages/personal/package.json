@@ -21,7 +21,8 @@
     "@stock/store": "workspace:*",
     "cheerio": "^1.2.0",
     "commander": "^15.0.0",
-    "csv-parse": "^7.0.3"
+    "csv-parse": "^7.0.3",
+    "unpdf": "2.2.1"
   },
   "devDependencies": {
     "vitest": "^5.1.0"

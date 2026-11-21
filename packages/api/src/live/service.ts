@@ -1,4 +1,5 @@
 import type { ServerResponse } from "node:http";
+import { sessionBars, type IntradayBar } from "@stock/analytics";
 import { createWasmTokenProvider, type TokenProvider } from "./auth";
 import {
   asRows,
@@ -83,6 +84,57 @@ export interface LiveDepthResponse {
   lastError: string | null;
 }
 
+/** Intraday intervals the NEPSE graph endpoint supports, in minutes. */
+export const INTRADAY_GRAPH_INTERVALS = [1, 5, 15, 30, 60] as const;
+
+const INTRADAY_TIMEFRAME: Record<number, string> = {
+  1: "1min",
+  5: "5min",
+  15: "15min",
+  30: "30min",
+  60: "1h",
+};
+
+/**
+ * NEPSE's index-graph ids, matching the constants nepseman-api publishes.
+ * The app's stored index symbols are the same names uppercased.
+ */
+const INDEX_GRAPH_IDS: Readonly<Record<string, number>> = {
+  BANKING: 51,
+  HOTELS_TOURISM: 52,
+  OTHERS: 53,
+  HYDROPOWER: 54,
+  DEVELOPMENT_BANK: 55,
+  MANUFACTURING: 56,
+  SENSITIVE: 57,
+  NEPSE: 58,
+  NON_LIFE_INSURANCE: 59,
+  FINANCE: 60,
+  TRADING: 61,
+  FLOAT: 62,
+  SENSITIVE_FLOAT: 63,
+  MICROFINANCE: 64,
+  LIFE_INSURANCE: 65,
+  MUTUAL_FUND: 66,
+  INVESTMENT: 67,
+};
+
+/** The latest session's intraday bars, one series per stored timeframe. */
+export interface LiveIntradayResponse {
+  enabled: boolean;
+  kind: "equity" | "index";
+  symbol: string;
+  /** Nepal-Time session date (`YYYY-MM-DD`). */
+  session: string | null;
+  asOf: string | null;
+  fetchedAt: string | null;
+  points: number;
+  series: Array<{ timeframe: string; bars: IntradayBar[] }>;
+  source: string;
+  disclaimer: string;
+  lastError: string | null;
+}
+
 export interface LiveServiceOptions {
   /** Defaults to `NEPSE_LIVE !== "0"` (also "false"/"off"/"no" disable). */
   enabled?: boolean;
@@ -103,6 +155,11 @@ export interface LiveService {
   market(): Promise<LiveMarketResponse>;
   summary(): Promise<LiveSummaryResponse>;
   depth(symbol: string): Promise<LiveDepthResponse>;
+  /** Latest-session 1m–1h bars from NEPSE's internal graph endpoint. */
+  intraday(
+    symbol: string,
+    kind: "equity" | "index",
+  ): Promise<LiveIntradayResponse>;
 }
 
 export function liveEnabledFromEnv(env: NodeJS.ProcessEnv): boolean {
@@ -279,6 +336,178 @@ export function createLiveService(options: LiveServiceOptions = {}): LiveService
 
   const depthEntries = new Map<string, Cached<DepthValue>>();
 
+  /** Latest-session price points, cached per series. */
+  interface IntradayValue {
+    session: string;
+    asOf: string;
+    points: number;
+    bars: Map<string, IntradayBar[]>;
+  }
+
+  const intradayEntries = new Map<string, Cached<IntradayValue>>();
+
+  function nptDateOf(iso: string): string {
+    const ms = Date.parse(iso);
+    return new Date(ms + 5 * 60 * 60_000 + 45 * 60_000)
+      .toISOString()
+      .slice(0, 10);
+  }
+
+  /** NEPSE returns NPT wall-clock prices as epoch seconds (UTC instant). */
+  function graphSamples(
+    payload: unknown,
+    kind: "equity" | "index",
+  ): Array<{ timestamp: string; price: number }> {
+    const rows = Array.isArray(payload) ? payload : [];
+    const samples: Array<{ timestamp: string; price: number }> = [];
+    for (const raw of rows) {
+      if (kind === "index") {
+        if (!Array.isArray(raw) || raw.length < 2) continue;
+        const seconds = Number(raw[0]);
+        const price = Number(raw[1]);
+        if (!Number.isFinite(seconds) || !Number.isFinite(price) || price <= 0) {
+          continue;
+        }
+        samples.push({
+          timestamp: new Date(seconds * 1000).toISOString(),
+          price,
+        });
+      } else {
+        if (!isRecord(raw)) continue;
+        const seconds = Number(raw.time);
+        const price = Number(raw.contractRate);
+        if (!Number.isFinite(seconds) || !Number.isFinite(price) || price <= 0) {
+          continue;
+        }
+        samples.push({
+          timestamp: new Date(seconds * 1000).toISOString(),
+          price,
+        });
+      }
+    }
+    return samples;
+  }
+
+  function intradayValue(
+    kind: "equity" | "index",
+    payload: unknown,
+  ): IntradayValue {
+    const samples = graphSamples(payload, kind);
+    if (samples.length === 0) {
+      throw new Error(
+        `nepalstock.com returned no ${kind} intraday points for the latest session (market closed or format changed)`,
+      );
+    }
+    const minute = sessionBars(samples, 1);
+    const bars = new Map<string, IntradayBar[]>();
+    for (const minutes of INTRADAY_GRAPH_INTERVALS) {
+      const timeframe = INTRADAY_TIMEFRAME[minutes]!;
+      bars.set(
+        timeframe,
+        minutes === 1 ? minute : sessionBars(samples, minutes),
+      );
+    }
+    const last = samples.reduce((newest, sample) =>
+      Date.parse(sample.timestamp) > Date.parse(newest.timestamp)
+        ? sample
+        : newest,
+    );
+    return {
+      session: nptDateOf(last.timestamp),
+      asOf: last.timestamp,
+      points: samples.length,
+      bars,
+    };
+  }
+
+  function intradayEntry(
+    kind: "equity" | "index",
+    symbol: string,
+  ): Cached<IntradayValue> {
+    const key = `${kind}:${symbol}`;
+    let entry = intradayEntries.get(key);
+    if (entry) {
+      intradayEntries.delete(key);
+      intradayEntries.set(key, entry);
+      return entry;
+    }
+    entry = new Cached<IntradayValue>(now, async () => {
+      if (kind === "index") {
+        const id = INDEX_GRAPH_IDS[symbol];
+        if (id === undefined) {
+          throw new Error(
+            `${symbol} has no nepalstock.com index-graph id (known: ${Object.keys(INDEX_GRAPH_IDS).join(", ")})`,
+          );
+        }
+        return intradayValue(kind, await session.postJson(
+          `/api/nots/graph/index/${id}`,
+          "general",
+        ));
+      }
+      await securitiesEntry.read(SECURITY_LIST_TTL_MS);
+      const securityId = securitiesEntry.value?.get(symbol);
+      if (securityId === undefined) {
+        throw new Error(
+          securitiesEntry.value
+            ? `${symbol} is not in nepalstock.com's security list`
+            : securitiesEntry.lastError ?? "security list unavailable",
+        );
+      }
+      return intradayValue(kind, await session.postJson(
+        `/api/nots/market/graphdata/daily/${securityId}`,
+        "stock-live",
+      ));
+    });
+    intradayEntries.set(key, entry);
+    return entry;
+  }
+
+  async function intraday(
+    input: string,
+    kind: "equity" | "index",
+  ): Promise<LiveIntradayResponse> {
+    const symbol = input.trim().toUpperCase();
+    const empty: LiveIntradayResponse = {
+      enabled,
+      kind,
+      symbol,
+      session: null,
+      asOf: null,
+      fetchedAt: null,
+      points: 0,
+      series: [],
+      source: LIVE_SOURCE,
+      disclaimer: LIVE_DISCLAIMER,
+      lastError: null,
+    };
+    if (!enabled) return empty;
+    if (!SYMBOL_PATTERN.test(symbol)) {
+      return { ...empty, lastError: "invalid symbol" };
+    }
+
+    const open = kind === "equity" ? await marketOpen() : null;
+    const ttl = open === true ? 30_000 : 5 * 60_000;
+    const entry = intradayEntry(kind, symbol);
+    await entry.read(ttl);
+    return {
+      enabled: true,
+      kind,
+      symbol,
+      session: entry.value?.session ?? null,
+      asOf: entry.value?.asOf ?? null,
+      fetchedAt: isoOrNull(entry.fetchedAt),
+      points: entry.value?.points ?? 0,
+      series: [...INTRADAY_GRAPH_INTERVALS].map((minutes) => ({
+        timeframe: INTRADAY_TIMEFRAME[minutes]!,
+        bars: entry.value?.bars.get(INTRADAY_TIMEFRAME[minutes]!) ?? [],
+      })),
+      source: LIVE_SOURCE,
+      disclaimer: LIVE_DISCLAIMER,
+      lastError: joinErrors(entry.lastError, statusEntry.lastError),
+    };
+  }
+
+
   function depthEntry(symbol: string, securityId: number): Cached<DepthValue> {
     const entry = new Cached<DepthValue>(now, async () => {
       const payload = await session.getJson(`${NEPSE_PATHS.marketDepth}${securityId}/`);
@@ -329,7 +558,7 @@ export function createLiveService(options: LiveServiceOptions = {}): LiveService
     }
     const open = await marketOpen();
     // The most recent failure of any resource that is currently failing.
-    const failing = [statusEntry, liveEntry, summaryEntry, indexEntry, securitiesEntry, ...depthEntries.values()]
+    const failing = [statusEntry, liveEntry, summaryEntry, indexEntry, securitiesEntry, ...depthEntries.values(), ...intradayEntries.values()]
       .filter((entry) => entry.lastError !== null)
       .sort((a, b) => (b.attemptedAt ?? 0) - (a.attemptedAt ?? 0));
     return {
@@ -462,10 +691,23 @@ export function createLiveService(options: LiveServiceOptions = {}): LiveService
         }
         return true;
       }
+      case "/api/live/intraday": {
+        const symbol = url.searchParams.get("symbol")?.trim().toUpperCase() ?? "";
+        const kind =
+          url.searchParams.get("kind") === "index" ? "index" : "equity";
+        if (!symbol) {
+          sendJson(response, 400, { error: "symbol is required" });
+        } else if (!SYMBOL_PATTERN.test(symbol)) {
+          sendJson(response, 400, { error: "invalid symbol" });
+        } else {
+          sendJson(response, 200, await intraday(symbol, kind));
+        }
+        return true;
+      }
       default:
         return false;
     }
   }
 
-  return { enabled, handle, status, market, summary, depth };
+  return { enabled, handle, status, market, summary, depth, intraday };
 }
