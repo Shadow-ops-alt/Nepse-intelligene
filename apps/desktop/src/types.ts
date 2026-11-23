@@ -54,6 +54,53 @@ export interface DataStateSummary {
   classification?: DataClassification;
 }
 
+export type RefreshPhase =
+  | "idle"
+  | "checking"
+  | "archive"
+  | "bulk"
+  | "details"
+  | "sync"
+  | "done"
+  | "error";
+
+export interface RefreshSummary {
+  startedAt: string;
+  finishedAt: string;
+  commit: string;
+  companies: number;
+  candles: number;
+  quotes: number;
+  latestSession: string | null;
+  bulkFailures: number;
+  detailsFailures: number;
+  warnings: number;
+  /** True when the archive came from the cached checkout. */
+  cached?: boolean;
+  /** Plain-language note when cached data was used. */
+  cacheNote?: string | null;
+}
+
+/** State of the automatic background refresh in the local API. */
+export interface RefreshStatus {
+  enabled: boolean;
+  running: boolean;
+  phase: RefreshPhase;
+  reason: string | null;
+  startedAt: string | null;
+  finishedAt: string | null;
+  lastSuccessAt: string | null;
+  lastError: string | null;
+  nextCheckAt: string | null;
+  consecutiveFailures: number;
+  intervalMinutes: number;
+  commit: string | null;
+  latestSession: string | null;
+  detailsEnabled: boolean;
+  lastProgress: string | null;
+  lastResult: RefreshSummary | null;
+}
+
 export interface Meta {
   edition: "free" | "licensed";
   environment: string;
@@ -67,6 +114,7 @@ export interface Meta {
   };
   store: StoreSummary;
   dataState: DataStateSummary & { classification: DataClassification };
+  refresh?: RefreshStatus;
 }
 
 export interface DatasetAvailability {

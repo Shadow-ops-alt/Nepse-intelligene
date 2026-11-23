@@ -52,12 +52,17 @@ Run the product locally:
 
 ```bash
 cp .env.example .env          # DATA_EDITION=free
-# Optional: explicitly fetch and import the public MIT-licensed NEPSE archive.
-DATA_EDITION=free pnpm personal:update \
-  --data-dir ./data/personal --db ./data/personal.db
-# Or import operator-supplied CSV files.
-pnpm personal:sync --data-dir ./data/personal --db ./data/personal.db
 pnpm dev                      # API on :4310, web on :5173
+```
+
+The app fetches public data automatically. It checks on launch and then every
+six hours while it is open, and the Data page shows progress, the last result
+and the next check. The first run imports full history and can take a few
+minutes. No command or CSV import is needed for normal use. Manual CSV import
+remains an offline fallback:
+
+```bash
+pnpm personal:sync --data-dir ./data/personal --db ./data/personal.db
 ```
 
 Build and serve the product from the local API:
@@ -72,6 +77,18 @@ Run it as a desktop app:
 pnpm desktop                  # builds web + API bundle, launches Electron
 pnpm desktop:package          # AppImage (Linux), NSIS (Windows), DMG (macOS)
 ```
+
+Test on a phone on the same network:
+
+```bash
+pnpm build:web
+NEPSE_LAN=1 pnpm dev:api      # prints a LAN URL such as http://192.168.1.42:4310/
+```
+
+Open that URL on the phone. The layout is responsive at 360-430px and the
+bundle includes a PWA manifest and service worker. Plain LAN HTTP works for
+testing, but browser install prompts need HTTPS or localhost. See
+[docs/MOBILE.md](docs/MOBILE.md).
 
 The Electron shell starts the API in a child process, waits for
 `/api/health`, then loads the local UI. Its database and data directory live
@@ -92,7 +109,7 @@ disables it). Indicators, signals and screens are mathematics on the stored
 end-of-day data, labelled *derived*. See [docs/HANDOFF.md](docs/HANDOFF.md)
 and the feature checklist in [docs/CLIENT_FEATURES.md](docs/CLIENT_FEATURES.md).
 
-Personal/free-source utilities:
+Personal/free-source utilities (developer tools, not needed by the client):
 
 ```bash
 pnpm personal:acquire
@@ -119,6 +136,7 @@ pnpm phase0:validate --provider licensed --env production
 - [Architecture](docs/ARCHITECTURE.md)
 - [Free Edition and Licensed Edition](docs/FREE_EDITION.md)
 - [Desktop shell](docs/DESKTOP.md)
+- [Mobile testing and PWA](docs/MOBILE.md)
 - [Data sources and licensing](docs/DATA_SOURCES.md)
 - [Phase 0 gate](docs/PHASE0.md)
 - [Phase 0 findings](docs/PHASE0_FINDINGS.md)

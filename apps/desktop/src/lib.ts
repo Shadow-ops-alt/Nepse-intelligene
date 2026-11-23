@@ -38,6 +38,29 @@ export const UPDATE_REMINDER_DAYS = 4;
 export const UPDATE_COMMAND =
   'DATA_EDITION=free pnpm personal:update --data-dir "$HOME/.config/NEPSE Terminal/data" --db "$HOME/.config/NEPSE Terminal/personal.db"';
 
+export const REFRESH_PHASE_LABELS: Record<string, string> = {
+  idle: "idle",
+  checking: "checking the public archive",
+  archive: "fetching the archive",
+  bulk: "fetching market datasets",
+  details: "refreshing company profiles",
+  sync: "importing into the database",
+  done: "complete",
+  error: "failed",
+};
+
+export function refreshPhaseLabel(phase: string | null | undefined): string {
+  if (!phase) return "idle";
+  return REFRESH_PHASE_LABELS[phase] ?? phase;
+}
+
+export function formatCheckTime(value: string | null | undefined): string {
+  if (!value) return "soon";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "soon";
+  return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+}
+
 export function readFlag(key: string, fallback: boolean): boolean {
   try {
     const stored = window.localStorage.getItem(key);

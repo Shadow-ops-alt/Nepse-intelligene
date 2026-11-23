@@ -56,7 +56,7 @@ interface CompanyEventsResponse {
   dataState: DataStateSummary;
 }
 
-/** Event types written by `personal:details` (ShareSansar company tabs). */
+/** Event types written by the automatic details pass (ShareSansar company tabs). */
 type EventType = "dividend" | "agm" | "rightShare" | "announcement" | "companyNews";
 
 type EventsTab = "issues" | "rights" | "dividends" | "mna" | "lockin" | "news";
@@ -195,13 +195,14 @@ function eventsProblem(state: EventsState, label: string): ReactNode | null {
           <>{data.unavailableReason}.</>
         ) : (
           <>
-            company-events.csv has not been written to the data folder yet. Run{" "}
-            <code>pnpm personal:details</code>.
+            company-events.csv has not been written to the data folder yet.
           </>
         )}{" "}
-        That job fetches per-company dividend, AGM, right-share, announcement
-        and company-news history (ShareSansar, unofficial); nothing is shown
-        until it has run.
+        Use <strong>Fetch company profiles</strong> on the{" "}
+        <strong>Data</strong> page to load per-company dividend, AGM,
+        right-share, announcement and company-news history from the public
+        company pages (ShareSansar, unofficial). Nothing is shown until that
+        details pass runs.
       </>
     );
   }
@@ -236,7 +237,7 @@ function EventsSourceLine({ states }: { states: EventsState[] }) {
   const cut = states.map(truncated).filter((value): value is number => value !== null);
   return (
     <SourceLine
-      source="ShareSansar company pages via personal:details (company-events.csv)"
+      source="ShareSansar company pages (details pass, company-events.csv)"
       fetchedAt={fetchedAt ?? withSource.source.modifiedAt}
     >
       file updated {formatTimestamp(withSource.source.modifiedAt)}
@@ -461,9 +462,9 @@ function IssuesTab({
   if (ipos.length === 0) {
     return (
       <EmptyState title="No public issues stored">
-        The issue pipeline is fetched by <code>pnpm personal:bulk</code> /{" "}
-        <code>pnpm personal:update</code> from ShareSansar’s upcoming-issue
-        list.
+        Automatic updates fetch the issue pipeline from ShareSansar’s
+        upcoming-issue list in the background while the app is open. Open the{" "}
+        <strong>Data</strong> page to check status or refresh now.
       </EmptyState>
     );
   }

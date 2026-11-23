@@ -210,8 +210,11 @@ function ProfilePanel({
     return (
       <MissingData title={`${symbol} is not in the company master`}>
         <p>
-          Import <code>companies.csv</code> (Data → Import). Profile fields come from{" "}
-          <code>pnpm personal:details</code>.
+          Automatic updates fetch the public company list in the background
+          while the app is open. Open the <strong>Data</strong> page to check
+          status or refresh now. If you are offline, put{" "}
+          <code>companies.csv</code> in the app data folder and import it from
+          the Data page.
         </p>
       </MissingData>
     );
@@ -283,9 +286,11 @@ function ProfilePanel({
       {!profileFetched && (
         <MissingData title="Public profile not fetched yet">
           <p>
-            Only the company master row is stored. Run <code>pnpm personal:details</code>{" "}
-            to fetch shares outstanding, paid-up value, registrar and contacts from the
-            public company pages, then import.
+            Only the company master row is stored. Use{" "}
+            <strong>Fetch company profiles</strong> on the{" "}
+            <strong>Data</strong> page to load shares outstanding, paid-up
+            value, registrar and contacts from the public company pages. Market
+            prices and the floorsheet update automatically.
           </p>
         </MissingData>
       )}
@@ -835,9 +840,10 @@ function EventsPanel({
       ) : state.data.source === null ? (
         <MissingData title="No company events stored yet">
           <p>
-            {state.data.unavailableReason ?? "company-events.csv has not been written to the data folder."} Run{" "}
-            <code>pnpm personal:details</code> to fetch announcements, AGMs, right shares,
-            dividends and company news from the public company pages.
+            {state.data.unavailableReason ?? "company-events.csv has not been written to the data folder."}{" "}
+            Use <strong>Fetch company profiles</strong> on the{" "}
+            <strong>Data</strong> page to load announcements, AGMs, right
+            shares, dividends and company news from the public company pages.
           </p>
         </MissingData>
       ) : total === 0 ? (
@@ -880,7 +886,7 @@ function EventsPanel({
         {news.loading ? (
           <Spinner label="Loading news" />
         ) : (news.data?.news.length ?? 0) === 0 ? (
-          <MissingData title="No market news stored" command="pnpm personal:update" />
+          <MissingData title="No market news stored" />
         ) : related.length === 0 ? (
           <p className="muted small" style={{ margin: 0 }}>
             None of the {news.data?.news.length} stored headlines mention {symbol}
@@ -1043,14 +1049,16 @@ function FloorsheetPanel({ symbol }: { symbol: string }) {
 
   if (state.loading) return <Spinner label="Loading the latest stored floorsheet" />;
   if (state.error || !state.data) {
-    return <MissingData title="Floorsheet unavailable" status={state.status} error={state.error} endpoint="/api/floorsheet" command="pnpm personal:update" />;
+    return <MissingData title="Floorsheet unavailable" status={state.status} error={state.error} endpoint="/api/floorsheet" />;
   }
   if (!state.data.date) {
     return (
-      <MissingData title="No floorsheet stored" command="pnpm personal:update">
+      <MissingData title="No floorsheet stored">
         <p>
-          Run <code>pnpm personal:update</code> (or <code>pnpm personal:bulk</code> then import);
-          only the latest public floorsheet page is available, so earlier days cannot be back-filled.
+          Automatic updates fetch the latest public floorsheet in the
+          background while the app is open. Only the latest public floorsheet
+          page is available, so earlier days cannot be back-filled. Open the{" "}
+          <strong>Data</strong> page to check status or refresh now.
         </p>
       </MissingData>
     );

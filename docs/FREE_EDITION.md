@@ -65,8 +65,35 @@ licensed production.
 
 ## Acquiring public data
 
-The Free Edition ships no market data and does not fetch in the background.
-An operator explicitly runs the acquisition commands:
+The packaged app fetches public data in the background while it is open.
+Normal use needs no manual import: on launch and every six hours the app
+checks the public archive, imports any new end-of-day sessions, and keeps the
+raw snapshot beside the data folder. Automatic updates run only while the app
+is open; they stop when it closes and resume on the next launch. Every
+imported row stays `UNVERIFIED`. The Data page shows the update status, the
+last result and a **Check now** action, backed by `GET /api/refresh/status`
+and `POST /api/refresh/run` on the local API.
+
+Manual CSV import is an offline fallback only, for a machine that cannot reach
+the public sources. The acquisition pipeline is conservative:
+
+- record the exact source commit or URL, retrieval time, licence/terms status,
+  and attribution;
+- preserve the raw archive under `data/source/binayabaral/<commit>/` and every
+  fetched web response as a content-addressed snapshot under `data/source/web/`;
+- normalize only rows that pass the app's OHLC and date/symbol invariants and
+  write every excluded row to a report;
+- merge new rows without overwriting valid stored history; genuine
+  disagreements are reported rather than silently resolved;
+- import in the same provider namespace and report changed/removed history;
+- leave the previous files and database intact when a fetch fails;
+- space requests to public sites, retry transient failures with backoff, and
+  cache responses within the configured age window;
+- keep using the last downloaded archive, and say so, when the remote cannot be
+  reached.
+
+The developer and operator commands below run the same pipeline outside the
+app. They are not needed for normal use:
 
 ```bash
 DATA_EDITION=free pnpm personal:update \
@@ -82,20 +109,7 @@ DATA_EDITION=free pnpm personal:bulk \
 
 `pnpm personal:update` runs `personal:acquire` and `personal:bulk`, then
 imports. `personal:details` is a separate, slower pass for per-company pages;
-run `personal:sync` afterwards. The commands:
-
-- record the exact source commit or URL, retrieval time, licence/terms status,
-  and attribution;
-- preserve the raw archive under `data/source/binayabaral/<commit>/` and every
-  fetched web response as a content-addressed snapshot under `data/source/web/`;
-- normalize only rows that pass the app's OHLC and date/symbol invariants and
-  write every excluded row to a report;
-- merge new rows without overwriting valid stored history; genuine
-  disagreements are reported rather than silently resolved;
-- import in the same provider namespace and report changed/removed history;
-- leave the previous files and database intact when a fetch fails;
-- space requests to public sites, retry transient failures with backoff, and
-  cache responses within the configured age window.
+run `personal:sync` afterwards.
 
 ShareSansar and Merolagani currently supply profiles, key ratios, corporate
 actions, market summary, sub-indices, current-day prices and floorsheet, news,
@@ -135,8 +149,9 @@ study panes.
 - Status is always text plus colour; colour alone never carries meaning (every
   change has an arrow glyph, every state a text badge).
 - Market timestamps are shown in Nepal Time (an EOD close reads 15:00 NPT).
-- When the newest stored session is more than four days old, a banner shows the
-  exact `personal:update` command. Nothing is fetched in the background.
+- When the newest stored session is more than four days old, a banner says the
+  archive is behind and points at the Data page. If automatic updates are
+  enabled it also shows the next check time; nothing needs to be run by hand.
 
 ### Derived analytics
 
@@ -238,11 +253,11 @@ data-layer rewrite.
 
 The Free Edition is a **local, single-user product**. It ships no vendor data,
 no reverse-engineered session flow, no authentication bypass and no WASM token
-generator. It does contain explicit, operator-invoked acquisition helpers for
-public HTML pages and JSON endpoints.
+generator. It does contain acquisition helpers for public HTML pages and JSON
+endpoints, which the packaged app runs automatically while it is open.
 
-- The operator supplies the files, or explicitly runs the acquisition
-  commands, and is responsible for the right to use the resulting data.
+- The operator supplies the files, or lets the app fetch the public pages
+  automatically, and is responsible for the right to use the resulting data.
 - The public pages' terms and redistribution rights are unverified. Treat the
   output as research input, not as a redistributable dataset.
 - Do not redistribute raw market data or a database that contains it.
@@ -267,6 +282,14 @@ NODE_ENV=production
 DATA_EDITION=free
 PERSONAL_DATA_DIR=./data/personal
 PERSONAL_DB=./data/personal.db
+# Automatic updates are on by default in the packaged app. Set 0 to disable.
+NEPSE_AUTO_REFRESH=1
+# Minutes between successful checks (default 360, minimum 15).
+NEPSE_AUTO_REFRESH_INTERVAL_MINUTES=360
+# Delay before the first check after startup, in milliseconds (default 8000).
+NEPSE_AUTO_REFRESH_INITIAL_DELAY_MS=8000
+# Include the slow profile and fundamentals pass (default off).
+NEPSE_AUTO_DETAILS=0
 ```
 
 Licensed Edition:

@@ -131,9 +131,9 @@ export function SettingsPage({
           </p>
         )}
         <p className="muted small">
-          The Free Edition never downloads market data by itself. Place the
-          files you have the right to use in the data directory, then import
-          them from the Data page.
+          Automatic updates fetch public market data in the background on launch
+          and every six hours while the app is open. Manual CSV import is an
+          offline fallback on the Data page.
         </p>
       </Card>
 
@@ -146,14 +146,11 @@ export function SettingsPage({
           watchlist, the portfolio ledger and import audits. Demo or mock rows
           are rejected at the store boundary.
         </p>
-        <div className="code-block">
-          <div>pnpm personal:backup --out backup.db</div>
-          <div>pnpm personal:restore --from backup.db --force</div>
-        </div>
         <p className="muted small">
           Backups use SQLite’s own <code>VACUUM INTO</code>, so they are
           consistent even while the app is open. Restore replaces the current
-          database; back it up first.
+          database; back it up first. Developer backup and restore commands are
+          on the Data page.
         </p>
       </Card>
 

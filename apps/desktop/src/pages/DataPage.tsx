@@ -1,7 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api";
-import { describeAge, nptDate, sessionAgeDays, UPDATE_COMMAND } from "../lib";
-import { useApi } from "../hooks";
+import {
+  describeAge,
+  formatCheckTime,
+  nptDate,
+  refreshPhaseLabel,
+  sessionAgeDays,
+  UPDATE_COMMAND,
+} from "../lib";
+import { useApi, useRefreshStatus } from "../hooks";
 import type {
   Coverage,
   ImportHistory,
@@ -73,14 +80,23 @@ export function DataPage({
   const coverageState = useApi<Coverage>("/api/coverage");
   const importState = useApi<ImportStatus>("/api/import/status");
   const historyState = useApi<ImportHistory>("/api/import/history");
+  const refreshState = useRefreshStatus();
+  const refresh = refreshState.data;
   const [from, setFrom] = useState(defaultFrom);
   const [to, setTo] = useState(isoToday);
   const [busy, setBusy] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [triggering, setTriggering] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const [result, setResult] = useState<ImportResult | null>(null);
   const [preview, setPreview] = useState<ImportPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+
+  // A later automatic success clears a stale manual-retry error.
+  useEffect(() => {
+    if (refresh?.lastSuccessAt) setRefreshError(null);
+  }, [refresh?.lastSuccessAt]);
 
   const importStatus = importState.data;
   const history = historyState.data?.entries ?? [];
@@ -93,6 +109,25 @@ export function DataPage({
       setTimeout(() => setCopied(false), 1500);
     } catch {
       setCopied(false);
+    }
+  }
+
+  async function triggerRefresh(force: boolean, details = false) {
+    setTriggering(true);
+    setRefreshError(null);
+    try {
+      await api("/api/refresh/run", {
+        method: "POST",
+        body: JSON.stringify({
+          ...(force ? { force: true } : {}),
+          ...(details ? { details: true } : {}),
+        }),
+      });
+      refreshState.reload();
+    } catch (cause) {
+      setRefreshError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setTriggering(false);
     }
   }
 
@@ -160,6 +195,192 @@ export function DataPage({
           hint={<AsOf value={meta.dataState.lastAsOf} />}
         />
       </div>
+
+      <Card
+        title="Automatic updates"
+        subtitle="The app checks the public archive itself while it is open"
+        action={
+          refresh ? (
+            <Badge
+              tone={
+                !refresh.enabled
+                  ? "neutral"
+                  : refresh.running
+                    ? "info"
+                    : refresh.lastError
+                      ? "warn"
+                      : "good"
+              }
+            >
+              {!refresh.enabled
+                ? "off"
+                : refresh.running
+                  ? "updating"
+                  : refresh.lastError
+                    ? "retrying"
+                    : "on"}
+            </Badge>
+          ) : undefined
+        }
+      >
+        {refreshState.loading && !refresh ? (
+          <Spinner label="Reading update status" />
+        ) : !refresh ? (
+          <EmptyState title="Update status unavailable">
+            {refreshState.error ?? "Check the local API."}
+          </EmptyState>
+        ) : (
+          <>
+            <p className="muted">
+              On launch and every{" "}
+              {refresh.intervalMinutes >= 60
+                ? `${Math.round(refresh.intervalMinutes / 60)} hours`
+                : `${refresh.intervalMinutes} minutes`}
+              , the app checks the public archive for new end-of-day sessions,
+              imports them into this database and keeps the raw snapshot. Your
+              watchlist, portfolio and notes are never touched. The archive is
+              unofficial, so imported rows stay labelled UNVERIFIED.
+            </p>
+
+            {refresh.running ? (
+              <Notice tone="info">
+                <strong>Updating:</strong> {refreshPhaseLabel(refresh.phase)}
+                {refresh.lastProgress ? ` · ${refresh.lastProgress}` : "…"}
+              </Notice>
+            ) : refresh.lastError ? (
+              <Notice tone="warn">
+                <strong>Last automatic update failed.</strong>{" "}
+                {refresh.lastError}
+                {refresh.nextCheckAt && (
+                  <> Next retry around {formatCheckTime(refresh.nextCheckAt)}.</>
+                )}
+              </Notice>
+            ) : null}
+
+            {!refresh.running &&
+              !refresh.lastError &&
+              refresh.lastResult?.cacheNote && (
+                <Notice tone="info">{refresh.lastResult.cacheNote}</Notice>
+              )}
+
+            <div className="kv">
+              <div>
+                <span>Status</span>
+                <strong>
+                  {!refresh.enabled
+                    ? "disabled"
+                    : refresh.running
+                      ? refreshPhaseLabel(refresh.phase)
+                      : refresh.lastError
+                        ? "waiting to retry"
+                        : refresh.lastSuccessAt
+                          ? "up to date"
+                          : "waiting for first check"}
+                </strong>
+              </div>
+              <div>
+                <span>Last success</span>
+                <strong>
+                  {refresh.lastSuccessAt
+                    ? refresh.lastSuccessAt.slice(0, 16).replace("T", " ")
+                    : "not yet"}
+                </strong>
+              </div>
+              <div>
+                <span>Next check</span>
+                <strong>
+                  {refresh.enabled
+                    ? formatCheckTime(refresh.nextCheckAt)
+                    : "off"}
+                </strong>
+              </div>
+              <div>
+                <span>Latest session</span>
+                <strong>
+                  {refresh.latestSession ??
+                    nptDate(meta.dataState.lastAsOf) ??
+                    "—"}
+                </strong>
+              </div>
+              <div>
+                <span>Archive commit</span>
+                <code>
+                  {refresh.commit ? refresh.commit.slice(0, 10) : "—"}
+                </code>
+              </div>
+              <div>
+                <span>Profiles and fundamentals</span>
+                <strong>
+                  {refresh.detailsEnabled ? "included" : "not included"}
+                </strong>
+              </div>
+            </div>
+
+            {refresh.lastResult && (
+              <p className="muted small">
+                Last run imported{" "}
+                {refresh.lastResult.companies.toLocaleString()} companies,{" "}
+                {refresh.lastResult.candles.toLocaleString()} candles and{" "}
+                {refresh.lastResult.quotes.toLocaleString()} quotes from session{" "}
+                {refresh.lastResult.latestSession ?? "—"}
+                {refresh.lastResult.warnings > 0
+                  ? ` with ${refresh.lastResult.warnings} warning${
+                      refresh.lastResult.warnings === 1 ? "" : "s"
+                    }`
+                  : ""}
+                .
+              </p>
+            )}
+
+            <div className="form-actions">
+              <button
+                className="button"
+                disabled={!refresh.enabled || refresh.running || triggering}
+                onClick={() => void triggerRefresh(false)}
+              >
+                {triggering || refresh.running
+                  ? "Checking…"
+                  : "Check for updates"}
+              </button>
+              <button
+                className="button button-ghost"
+                disabled={!refresh.enabled || refresh.running || triggering}
+                onClick={() => void triggerRefresh(true)}
+                title="Download the archive again even when the archive commit has not changed"
+              >
+                Re-download archive
+              </button>
+              <button
+                className="button button-ghost"
+                disabled={!refresh.enabled || refresh.running || triggering}
+                onClick={() => void triggerRefresh(false, true)}
+                title="Also fetch company profiles, fundamentals and company events from the public pages. This slower pass can take 10 to 25 minutes and keeps running in the background."
+              >
+                Fetch company profiles
+              </button>
+            </div>
+
+            {refreshError && <p className="form-error">{refreshError}</p>}
+
+            {!refresh.enabled && (
+              <Notice tone="warn">
+                Automatic updates are off. Set{" "}
+                <code>NEPSE_AUTO_REFRESH=1</code> before launching the app to
+                turn them back on, or use the offline import below.
+              </Notice>
+            )}
+
+            <p className="muted small">
+              Price history, index history, quotes, the latest floorsheet,
+              corporate actions, news and IPOs refresh on every automatic run.
+              Company profiles, fundamentals and company events use the slower
+              details pass: use <strong>Fetch company profiles</strong> for a
+              one-off run, or set <code>NEPSE_AUTO_DETAILS=1</code> to include
+              it in every automatic check.
+            </p>
+          </>
+        )}
+      </Card>
 
       <Card
         title="Provider"
@@ -325,8 +546,8 @@ export function DataPage({
       </Card>
 
       <Card
-        title="Import wizard"
-        subtitle="The Free Edition reads operator-supplied CSV files from the local data directory"
+        title="Offline import (fallback)"
+        subtitle="Only for CSV files you supply yourself; automatic updates cover normal use"
         action={
           <div className="card-actions">
             <Badge tone={importStatus?.canImport ? "good" : "warn"}>
@@ -350,11 +571,10 @@ export function DataPage({
         ) : (
           <>
             <p className="muted">
-              The app does not download data in the background. Put the CSV
-              files below in this folder and preview or run the import. On the
-              command line,{" "}
-              <code>pnpm personal:update</code> explicitly fetches the public
-              MIT-licensed archive and imports it. Minimum useful set:{" "}
+              Automatic updates keep the database current from the public
+              archive. Use this wizard only when you are offline or need to
+              import operator-supplied CSVs. Put the files below in this folder
+              and preview or run the import. Minimum useful set:{" "}
               <code>companies.csv</code> plus{" "}
               <code>ohlc/&lt;SYMBOL&gt;.csv</code>.
             </p>
@@ -478,8 +698,9 @@ export function DataPage({
             </div>
 
             <p className="muted small">
-              Prefer the CLI?{" "}
-              <code>pnpm personal:sync --data-dir {importStatus.dataDir}</code>
+              Offline fallback only. Automatic updates are the normal path. This
+              import reads files already in the folder above and never touches
+              your watchlist, portfolio or notes.
             </p>
 
             {error && <p className="form-error">{error}</p>}
@@ -604,21 +825,46 @@ export function DataPage({
 
       <Card
         title="Updating the archive"
-        subtitle="There is no background fetch; refresh explicitly when you want newer sessions"
+        subtitle="Automatic by default; the manual pipeline remains for operators"
       >
         <p className="muted">
           The Free Edition reads an unofficial, community-maintained end-of-day
-          archive. Updating re-fetches it, keeps the raw snapshot, validates
-          every row, and imports into the same namespace without deleting your
-          watchlist or portfolio.
+          archive. The app fetches it on launch and every few hours, keeps the
+          raw snapshot, validates every row, and imports into the same namespace
+          without deleting your watchlist or portfolio. If the archive has not
+          changed, the check exits without downloading it again.
         </p>
-        <div className="code-block">
-          <div>{UPDATE_COMMAND}</div>
-        </div>
         <p className="muted small">
           Last stored session: <strong>{nptDate(meta.dataState.lastAsOf) ?? "—"}</strong>{" "}
           ({describeAge(sessionAgeDays(meta.dataState.lastAsOf))}).
         </p>
+        <details className="card-footer">
+          <summary>Developer and operator commands</summary>
+          <div className="card-footer-body">
+            <p className="muted small">
+              The desktop app uses the same pipeline as this command. Run it
+              from the repository when you need a one-off refresh outside the
+              app:
+            </p>
+            <div className="code-block">
+              <div>{UPDATE_COMMAND}</div>
+            </div>
+            <p className="muted small">
+              Other operator commands:
+            </p>
+            <div className="code-block">
+              <div>pnpm personal:sync --data-dir {importStatus?.dataDir ?? "<data directory>"}</div>
+              <div>pnpm personal:backup --out backup.db</div>
+              <div>pnpm personal:restore --from backup.db --force</div>
+            </div>
+            <p className="muted small">
+              Set <code>NEPSE_AUTO_REFRESH=0</code> to disable background checks,{" "}
+              <code>NEPSE_AUTO_REFRESH_INTERVAL_MINUTES</code> to change the
+              interval (minimum 15), and <code>NEPSE_AUTO_DETAILS=1</code> to
+              include the slow company-profile and fundamentals pass.
+            </p>
+          </div>
+        </details>
       </Card>
 
       <Card title="What the free edition cannot do" subtitle="Honest limits">
@@ -632,7 +878,9 @@ export function DataPage({
             public trading day is stored, and broker flows are derived from it.
           </li>
           <li>
-            No free intraday or live prices: every price is an end-of-day close.
+            No historical intraday archive: session-only intraday candles can be
+            built from live snapshots while the app is open, but there is no
+            free historical intraday history.
           </li>
           <li>
             No mutual-fund portfolio holdings; only the published NAV series.

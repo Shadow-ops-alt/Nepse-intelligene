@@ -32,6 +32,9 @@ const { server, edition } = createApiServer({
   dataDir,
   webDir,
   env: process.env,
+  // The client never runs pnpm: the shell refreshes the archive itself.
+  // NEPSE_AUTO_REFRESH=0 opts out (e.g. an offline installation).
+  autoRefresh: process.env.NEPSE_AUTO_REFRESH !== "0",
 });
 
 server.listen(port, "127.0.0.1", () => {

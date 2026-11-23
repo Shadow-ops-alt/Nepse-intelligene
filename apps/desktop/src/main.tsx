@@ -17,3 +17,14 @@ createRoot(root).render(
     </ThemeProvider>
   </StrictMode>,
 );
+
+// Production only. Service workers need a secure context (localhost or HTTPS),
+// so a LAN HTTP phone session simply runs without one. Registration is silent:
+// Electron and unsupported browsers keep working exactly as before.
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("/sw.js").catch(() => {
+      // Offline caching is optional; never surface this to the app.
+    });
+  });
+}

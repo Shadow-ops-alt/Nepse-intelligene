@@ -289,6 +289,9 @@ importers:
       csv-parse:
         specifier: ^7.0.3
         version: 7.0.3
+      tar:
+        specifier: 7.5.22
+        version: 7.5.22
       unpdf:
         specifier: 2.2.1
         version: 2.2.1

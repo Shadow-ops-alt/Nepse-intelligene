@@ -28,10 +28,12 @@ is a historical record.
 unofficial NEPSE API wrapper ship in this product.
 
 **Prices come only from unofficial, public end-of-day data.** Today that is the
-MIT-licensed community archive `binayabaral/nepal-market-data`, fetched
-explicitly with `pnpm personal:update`, validated row by row, and stored
-locally with provenance. Every row is `UNVERIFIED`, every price is an
-end-of-day close, and the app says so on every screen.
+MIT-licensed community archive `binayabaral/nepal-market-data`, fetched by the
+app automatically on launch and every six hours while it is open (the same
+pipeline as `pnpm personal:update`), validated row by row, and stored locally
+with provenance. Every row is `UNVERIFIED`, every price is an end-of-day close,
+and the app says so on every screen. Manual CSV import is an offline fallback
+only.
 
 **Everything else is mathematics on those closes.** Indicators, returns, risk,
 candlestick patterns, breadth, sector heat, correlation and signal tallies are
@@ -82,8 +84,8 @@ published and stay unavailable.
 ### UI (`apps/desktop`)
 - New shell: icon sidebar (collapsible, `Ctrl B`), command palette
   (`Ctrl K` or `/`), `Alt 1–7` page shortcuts, an EOD session pill, a status
-  bar, and a **"data is N days old" banner** with the exact update command.
-  There is still no background fetch.
+  bar, and a **"data is N days old" banner** that points at the Data page.
+  Automatic updates fetch new sessions in the background while the app is open.
 - Market: index KPI with sparkline, source-reported turnover, breadth bar,
   median change, % of active equities above SMA 200, index chart with period
   returns/volatility/drawdown, movers tabs (gainers/losers/turnover/volume) from
@@ -165,7 +167,8 @@ test.
 | Unclassified equities | 31 (10 active: CFL, HRL, JHAPA, MKCL, NRIC, NRM, NTC, NWCL, PURE, TTL) |
 | Index rows with turnover | 2,326 |
 
-These come from a fresh `personal:update` into an empty directory, not from the
+These come from a fresh update into an empty directory (the same pipeline the
+app now runs automatically), not from the
 installed database at `~/.config/NEPSE Terminal`. Re-run the update there and
 compare (P0-1 below).
 
@@ -187,7 +190,9 @@ compare (P0-1 below).
 ## 6. Remaining work, prioritised
 
 ### P0 — finish the release
-1. **Refresh the installed data** to `fded4ea…`:
+1. **Refresh the installed data** to `fded4ea…`. In the packaged app, open the
+   Data page and use **Check now** (automatic updates already run on launch and
+   every six hours). For a forced developer refresh outside the app:
    ```bash
    DATA_EDITION=free pnpm personal:update --force \
      --data-dir "$HOME/.config/NEPSE Terminal/data" \

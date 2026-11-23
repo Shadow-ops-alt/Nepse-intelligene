@@ -1,0 +1,26 @@
+{
+  "name": "NEPSE Terminal",
+  "short_name": "NEPSE",
+  "description": "Local end-of-day NEPSE research terminal: market breadth, charts, fundamentals and personal tools.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "any",
+  "background_color": "#090b0f",
+  "theme_color": "#0d1015",
+  "icons": [
+    {
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    }
+  ]
+}

@@ -1,6 +1,6 @@
 {
   "name": "@stock/personal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
@@ -22,6 +22,7 @@
     "cheerio": "^1.2.0",
     "commander": "^15.0.0",
     "csv-parse": "^7.0.3",
+    "tar": "7.5.22",
     "unpdf": "2.2.1"
   },
   "devDependencies": {

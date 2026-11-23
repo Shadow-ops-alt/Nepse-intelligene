@@ -282,8 +282,9 @@ function MissingNotices({ entries }: { entries: Entry[] }) {
     <Notice tone="warn">
       {noFundamentals.length > 0 && (
         <span>
-          No stored fundamentals for {noFundamentals.join(", ")} — run{" "}
-          <code>pnpm personal:details</code> and import. Their columns show —.{" "}
+          No stored fundamentals for {noFundamentals.join(", ")}. Use{" "}
+          <strong>Fetch company profiles</strong> on the Data page to load
+          them; their columns stay blank until then.{" "}
         </span>
       )}
       {noCandles.length > 0 && (
@@ -573,7 +574,7 @@ function HistoryCard({ entries }: { entries: Entry[] }) {
           </label>
         ) : undefined
       }
-      footer="Periods are whatever the public pages displayed when fetched (Merolagani key ratios are labelled by fiscal year; ShareSansar statements by quarter). Re-running personal:details adds new periods over time; older periods are never back-filled or interpolated."
+      footer="Periods are whatever the public pages displayed when fetched (Merolagani key ratios are labelled by fiscal year; ShareSansar statements by quarter). The company-details pass adds new periods when it runs; older periods are never back-filled or interpolated."
     >
       {!metric || periods.length === 0 ? (
         <EmptyState title="No stored periods for these companies" />
@@ -665,7 +666,9 @@ function PerformanceCard({ entries }: { entries: Entry[] }) {
     return (
       <Card title="Price performance">
         <EmptyState title="No stored price history for these companies">
-          Price performance is computed from stored daily closes (<code>pnpm personal:update</code>).
+          Price performance is computed from stored daily closes. Automatic
+          updates fetch new end-of-day prices in the background; open the Data
+          page to refresh now.
         </EmptyState>
       </Card>
     );

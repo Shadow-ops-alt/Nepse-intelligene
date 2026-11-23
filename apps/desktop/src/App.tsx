@@ -2,11 +2,13 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactElement,
   type ReactNode,
 } from "react";
-import { useApi } from "./hooks";
+import { useApi, useRefreshStatus } from "./hooks";
+import { api } from "./api";
 import type { CompaniesResponse, Meta } from "./types";
 import { DataStateBadge, Spinner } from "./components/ui";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -16,10 +18,11 @@ import { Icon } from "./components/icons";
 import { useTheme } from "./theme";
 import {
   describeAge,
+  formatCheckTime,
   nptDate,
   readFlag,
+  refreshPhaseLabel,
   sessionAgeDays,
-  UPDATE_COMMAND,
   UPDATE_REMINDER_DAYS,
   writeFlag,
 } from "./lib";
@@ -198,17 +201,52 @@ export function App() {
   const route = useHashRoute();
   const metaState = useApi<Meta>("/api/meta");
   const companiesState = useApi<CompaniesResponse>("/api/companies");
+  const refreshState = useRefreshStatus();
   const meta = metaState.data;
+  const refresh = refreshState.data;
   const { resolved, setMode } = useTheme();
   const [collapsed, setCollapsed] = useState(() => readFlag(SIDEBAR_KEY, false));
+  const [drawerOpen, setDrawerOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
   const alerts = useAlerts(Boolean(metaState.data));
 
   const segments = route.split("/").filter(Boolean);
   const page = segments[0] ?? "market";
   const symbol = (segments[1] ?? "").toUpperCase();
 
+  // The mobile navigation drawer is scoped to one page visit.
+  useEffect(() => {
+    setDrawerOpen(false);
+  }, [route]);
+
   const openSymbol = useCallback((next: string) => navigate(`/company/${next}`), []);
+
+  const triggerRefresh = useCallback(async () => {
+    setRefreshError(null);
+    try {
+      await api("/api/refresh/run", {
+        method: "POST",
+        body: JSON.stringify({}),
+      });
+      refreshState.reload();
+    } catch (cause) {
+      setRefreshError(cause instanceof Error ? cause.message : String(cause));
+    }
+  }, [refreshState.reload]);
+
+  const lastSuccessRef = useRef<string | null>(null);
+  useEffect(() => {
+    const next = refresh?.lastSuccessAt ?? null;
+    if (next && lastSuccessRef.current && next !== lastSuccessRef.current) {
+      // A background import finished: refresh the session pill and company list.
+      metaState.reload();
+      companiesState.reload();
+      // Clear a stale manual-retry error now that an update has succeeded.
+      setRefreshError(null);
+    }
+    lastSuccessRef.current = next;
+  }, [refresh?.lastSuccessAt, metaState.reload, companiesState.reload]);
 
   const toggleSidebar = useCallback(() => {
     setCollapsed((value) => {
@@ -234,6 +272,10 @@ export function App() {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
         event.preventDefault();
         toggleSidebar();
+        return;
+      }
+      if (event.key === "Escape") {
+        setDrawerOpen(false);
         return;
       }
       if (typing) return;
@@ -283,13 +325,25 @@ export function App() {
       },
       {
         id: "update",
-        label: "How to update the local archive",
-        hint: "No background fetch — updates are manual",
+        label: "Data updates and status",
+        hint: refresh?.running
+          ? `Updating: ${refresh.phase}`
+          : refresh?.enabled
+            ? "Automatic updates are on"
+            : "Automatic updates are off",
         icon: Icon.Download,
         run: () => navigate("/data"),
       },
     ],
-    [resolved, setMode, collapsed, toggleSidebar],
+    [
+      resolved,
+      setMode,
+      collapsed,
+      toggleSidebar,
+      refresh?.running,
+      refresh?.phase,
+      refresh?.enabled,
+    ],
   );
 
   const current =
@@ -309,7 +363,9 @@ export function App() {
         <div className="empty-body">
           <p>{metaState.error}</p>
           <p className="muted small">
-            Start the local API with <code>pnpm dev:api</code>, then reload.
+            The local data service did not start. Quit and reopen NEPSE
+            Terminal. If this keeps happening, open the Data page after the
+            service is running or reinstall the app.
           </p>
         </div>
       </div>
@@ -364,7 +420,10 @@ export function App() {
           className={`nav-item ${active ? "nav-active" : ""}`}
           aria-current={active ? "page" : undefined}
           title={item.key ? `${item.label} (Alt ${item.key})` : item.label}
-          onClick={() => navigate(item.path)}
+          onClick={() => {
+            navigate(item.path);
+            setDrawerOpen(false);
+          }}
         >
           <ItemIcon />
           <span className="nav-label">{item.label}</span>
@@ -378,11 +437,37 @@ export function App() {
     });
 
   return (
-    <div className={`app ${collapsed ? "sidebar-collapsed" : ""}`}>
-      <aside className="sidebar">
+    <div
+      className={`app ${collapsed ? "sidebar-collapsed" : ""} ${
+        drawerOpen ? "sidebar-open" : ""
+      }`}
+    >
+      <aside className="sidebar" id="app-sidebar">
+        <button
+          type="button"
+          className="drawer-close"
+          aria-label="Close navigation"
+          onClick={() => setDrawerOpen(false)}
+        >
+          <svg
+            viewBox="0 0 24 24"
+            width="18"
+            height="18"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            aria-hidden="true"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
         <button
           className="brand"
-          onClick={() => navigate("/market")}
+          onClick={() => {
+            navigate("/market");
+            setDrawerOpen(false);
+          }}
           aria-label="NEPSE Terminal home"
         >
           <span className="brand-mark" aria-hidden="true">
@@ -432,6 +517,15 @@ export function App() {
         </div>
       </aside>
 
+      {drawerOpen && (
+        <button
+          type="button"
+          className="drawer-backdrop"
+          aria-label="Close navigation"
+          onClick={() => setDrawerOpen(false)}
+        />
+      )}
+
       <main className="main">
         {meta?.edition === "free" && (
           <div className="edition-strip" role="note">
@@ -444,6 +538,27 @@ export function App() {
         )}
 
         <header className="topbar">
+          <button
+            type="button"
+            className="menu-toggle"
+            aria-label="Open navigation"
+            aria-controls="app-sidebar"
+            aria-expanded={drawerOpen}
+            onClick={() => setDrawerOpen(true)}
+          >
+            <svg
+              viewBox="0 0 24 24"
+              width="20"
+              height="20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              aria-hidden="true"
+            >
+              <path d="M4 7h16M4 12h16M4 17h16" />
+            </svg>
+          </button>
           <div className="topbar-heading">
             <h1 className="topbar-title">
               {page === "company" && symbol ? symbol : current?.title}
@@ -480,14 +595,40 @@ export function App() {
         </header>
 
         <div className="content">
-          {needsUpdate && page !== "data" && (
+          {refresh?.running && (
             <div className="banner" role="status" style={{ marginBottom: 16 }}>
+              <Icon.Download />
+              <div className="banner-body">
+                <strong>Updating market data automatically.</strong>{" "}
+                {refreshPhaseLabel(refresh.phase)}
+                {refresh.lastProgress ? ` · ${refresh.lastProgress}` : ""}
+              </div>
+              <button
+                type="button"
+                className="button button-ghost button-small"
+                onClick={() => navigate("/data")}
+              >
+                Progress
+              </button>
+            </div>
+          )}
+          {!refresh?.running && (refresh?.lastError || refreshError) && (
+            <div className="banner" role="alert" style={{ marginBottom: 16 }}>
               <Icon.Alert />
               <div className="banner-body">
-                <strong>The local archive is {describeAge(ageDays)}.</strong>{" "}
-                The app never fetches in the background. To refresh, run{" "}
-                <code>{UPDATE_COMMAND}</code>
+                <strong>Automatic update failed.</strong>{" "}
+                {refreshError ?? refresh?.lastError}
+                {refresh?.nextCheckAt && (
+                  <> Next retry at {formatCheckTime(refresh.nextCheckAt)}.</>
+                )}
               </div>
+              <button
+                type="button"
+                className="button button-ghost button-small"
+                onClick={() => void triggerRefresh()}
+              >
+                Retry now
+              </button>
               <button
                 type="button"
                 className="button button-ghost button-small"
@@ -497,6 +638,38 @@ export function App() {
               </button>
             </div>
           )}
+          {!refresh?.running &&
+            !refresh?.lastError &&
+            !refreshError &&
+            refresh &&
+            needsUpdate &&
+            page !== "data" && (
+              <div className="banner" role="status" style={{ marginBottom: 16 }}>
+                <Icon.Alert />
+                <div className="banner-body">
+                  <strong>The local archive is {describeAge(ageDays)}.</strong>{" "}
+                  {refresh.enabled
+                    ? `Automatic updates are on; the next check is at ${formatCheckTime(refresh.nextCheckAt)}.`
+                    : "Automatic updates are off. Open the Data page to refresh."}
+                </div>
+                {refresh.enabled && (
+                  <button
+                    type="button"
+                    className="button button-ghost button-small"
+                    onClick={() => void triggerRefresh()}
+                  >
+                    Check now
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="button button-ghost button-small"
+                  onClick={() => navigate("/data")}
+                >
+                  Data page
+                </button>
+              </div>
+            )}
           <ErrorBoundary key={route}>{content}</ErrorBoundary>
         </div>
       </main>
@@ -511,6 +684,22 @@ export function App() {
         </span>
         <span className="status-item">
           Classification <strong>{meta?.dataState.classification ?? "—"}</strong>
+        </span>
+        <span className="status-item">
+          <span
+            className={`dot ${
+              refresh?.running
+                ? "dot-good"
+                : refresh?.lastError
+                  ? "dot-stale"
+                  : "dot-eod"
+            }`}
+          />
+          {refresh?.running
+            ? "Updating data…"
+            : refresh?.enabled
+              ? "Auto-updates on"
+              : "Auto-updates off"}
         </span>
         <span className="status-spacer" />
         <span className="status-item">

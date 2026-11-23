@@ -311,9 +311,10 @@ export function SectorsPage({
   if (companies.length === 0) {
     return (
       <EmptyState title="No companies stored">
-        Sector views group the company master by sector. Import{" "}
-        <code>companies.csv</code> first (Data → Import or{" "}
-        <code>pnpm personal:update</code>).
+        Sector views group the company master by sector. Automatic updates
+        fetch the company list in the background while the app is open; open
+        the <strong>Data</strong> page to check status or refresh now. If you
+        are offline, import <code>companies.csv</code> from the Data page.
       </EmptyState>
     );
   }

@@ -338,10 +338,9 @@ export function FundamentalsPage({ onOpenSymbol }: { onOpenSymbol: (s: string) =
           >
             {!latestState.error && universe.funds > 0 ? (
               <p>
-                Only mutual-fund NAVs ({universe.funds}) are stored. Run{" "}
-                <code>pnpm personal:details</code> to fetch company key ratios and
-                quarterly statements, then import (<strong>Data → Import</strong> or{" "}
-                <code>pnpm personal:sync</code>).
+                Only mutual-fund NAVs ({universe.funds}) are stored. Use{" "}
+                <strong>Fetch company profiles</strong> on the Data page to
+                load company key ratios and quarterly statements.
               </p>
             ) : undefined}
           </MissingData>

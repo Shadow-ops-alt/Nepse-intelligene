@@ -78,25 +78,32 @@ export function ProvenanceLine({
   );
 }
 
-/** Explain why a dataset is missing instead of crashing or showing blanks. */
+/**
+ * Explain why a dataset is missing instead of crashing or showing blanks.
+ *
+ * Client builds never show shell commands here. The packaged app fetches the
+ * public pages in the background, so the default message points at the Data
+ * page. A developer command is shown only when a caller passes `command`.
+ */
 export function MissingData({
   title,
   status,
   error,
   endpoint,
-  command = "pnpm personal:details",
+  command,
   children,
 }: {
   title: string;
   status?: number | null;
   error?: string | null;
   endpoint?: string;
+  /** Developer-only command. Pass this only in developer-facing copy. */
   command?: string;
   children?: ReactNode;
 }) {
   const reason =
     status === 404 && endpoint
-      ? `The local API does not serve ${endpoint} yet (HTTP 404) — update the app/API, or nothing is stored for this request.`
+      ? `The local API does not serve ${endpoint} yet (HTTP 404). Update the app/API, or nothing is stored for this request.`
       : error
         ? `Request failed: ${error}`
         : null;
@@ -105,8 +112,15 @@ export function MissingData({
       {reason && <p>{reason}</p>}
       {children ?? (
         <p>
-          Run <code>{command}</code> to fetch public company pages, then import
-          (<strong>Data → Import</strong> or <code>pnpm personal:sync</code>).
+          Automatic updates fetch public data in the background while the app
+          is open. Open the <strong>Data</strong> page to see update status,
+          check now, or import CSV files manually when you are offline.
+          {command ? (
+            <>
+              {" "}
+              Developers can run <code>{command}</code> from a terminal.
+            </>
+          ) : null}
         </p>
       )}
     </EmptyState>

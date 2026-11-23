@@ -78,7 +78,8 @@ Provenance and limitations:
   The public web helpers (section 2) add the latest values for those datasets;
   they do not reconstruct their history.
 
-Acquisition command:
+Acquisition command (the packaged app runs the same pipeline automatically;
+this command is a developer fallback):
 
 ```bash
 DATA_EDITION=free pnpm personal:update \
@@ -91,12 +92,13 @@ writing the database. Both commands reuse a local clone for 30 minutes by
 default, record every attempt in `data/reports/provider-health.json`, and never
 delete the database or previously valid rows when a refresh fails.
 
-### 2. ShareSansar and Merolagani public pages — installed by explicit fetch
+### 2. ShareSansar and Merolagani public pages — fetched automatically
 
-These pages fill the datasets the git archive does not publish. They are read
-only when the operator runs `pnpm personal:details` or `pnpm personal:bulk`;
-the app never fetches in the background. Every response is preserved as a
-content-addressed snapshot under `data/source/web/` with its URL, fetch time,
+These pages fill the datasets the git archive does not publish. The packaged
+desktop app fetches them automatically on launch and every six hours while it
+is open; the developer commands `pnpm personal:details` and
+`pnpm personal:bulk` run the same fetch by hand. Every response is preserved as
+a content-addressed snapshot under `data/source/web/` with its URL, fetch time,
 status and hash.
 
 | Source | Datasets | Verified behaviour (2026-11-14) |
@@ -178,10 +180,12 @@ show unavailable rather than invented values.
 
 ### 6. Update, caching, and failure behaviour
 
-- `pnpm personal:update`, `personal:details` and `personal:bulk` are explicit
-  entry points; the app never fetches in the background.
-- The archive source is a public git repository. A shallow clone/fetch is used,
-  not a REST loop. Web pages use throttled GET/POST with cached responses.
+- The packaged app runs `personal:update`, `personal:details` and
+  `personal:bulk` automatically on launch and every six hours while it is open.
+  The commands remain available for developers and for offline operation.
+- The archive source is a public GitHub repository. The shipped app downloads
+  the commit tarball over HTTPS (git is not required); the CLI can fall back to
+  a shallow clone/fetch. Web pages use throttled GET/POST with cached responses.
 - Archive fetches are cached for 30 minutes by default; web pages use a
   12-hour page cache (`--max-age-minutes`/`--force` override it).
 - Git network operations and web requests retry with exponential backoff
@@ -189,6 +193,9 @@ show unavailable rather than invented values.
 - A failed fetch leaves the previous canonical files and database untouched and
   records the failure plus a consecutive-failure count in
   `reports/provider-health.json`.
+- A failed web or details pass still imports the archive. If the remote archive
+  cannot be checked, the app keeps using the last downloaded copy and reports
+  "using cached data" until the next successful check.
 - Import is idempotent: candles are keyed by provider, kind, symbol, timeframe,
   and timestamp; companies by provider and symbol; quotes by provider and
   symbol.
@@ -249,11 +256,12 @@ is a local, single-user research tool, not a data-redistribution product.
 
 ## Authentication and access
 
-The shipped Free Edition makes **no background** call to NEPSE, ShareSansar or
-Merolagani. Acquisition happens only when the operator explicitly runs
-`pnpm personal:update`, `personal:details` or `personal:bulk`. This section
-retains the original authenticated NEPSE endpoint analysis because that path
-remains blocked for production: it needs a session token and a bundled
+The shipped Free Edition fetches public archive and public web pages
+automatically while the app is open, using only anonymously reachable URLs and
+the same pipeline as `pnpm personal:update`, `personal:details` and
+`personal:bulk`. It makes no authenticated NEPSE request. This section retains
+the original authenticated NEPSE endpoint analysis because that path remains
+blocked for production: it needs a session token and a bundled
 reverse-engineered WASM helper, neither of which is shipped.
 
 The unofficial wrapper obtains a Nepali stock-exchange session token through

@@ -45,7 +45,7 @@ Legend: ✅ done · 🟡 partial (works, with a stated data limit) · ⛔ blocke
 | Up trend / down trend / sideways | ✅ | Screener presets | SMA 20/50/200 stacking. |
 | Trending stocks (1 and 2 weeks) | ✅ | Screener presets "Trending 1W/2W" | Calendar 7/14-day returns with volume confirmation. |
 | Volatile stocks 2% / 3% | ✅ | Screener presets | Average absolute daily move over 20 sessions. |
-| Low / mid / high / large cap | 🟡 | Screener "Market cap" | Percentile classes (Large top 10%, High next 20%, Mid next 30%, Low bottom 40%). Needs company profiles (`personal:details`) for shares outstanding/market cap. |
+| Low / mid / high / large cap | 🟡 | Screener "Market cap" | Percentile classes (Large top 10%, High next 20%, Mid next 30%, Low bottom 40%). Needs company profiles (shares outstanding/market cap) from automatic updates. |
 
 ## Alerts and assistant
 
@@ -84,7 +84,7 @@ Legend: ✅ done · 🟡 partial (works, with a stated data limit) · ⛔ blocke
 | Broker buy/sell (stock bought by brokers) | 🟡 | Floorsheet → Brokers / Stock by broker | From the stored floorsheet days only. |
 | Broker holdings | ⛔ (estimate shown) | Floorsheet → Broker holding (estimate) | Actual broker/CDS holdings are not published; the app shows net flow over stored days, labelled as an estimate. |
 | Bulk transactions | ✅ | Floorsheet → Bulk transactions | Trades ≥ Rs 1 crore (adjustable) or ≥ 10,000 units. |
-| 3-day top buy stocks | 🟡 | Floorsheet → 3-day top buy | The free page publishes only the latest day; history accumulates when `personal:bulk` runs each trading day. The page states how many days were used. |
+| 3-day top buy stocks | 🟡 | Floorsheet → 3-day top buy | The free page publishes only the latest day; history accumulates one day per automatic update while the app is open. The page states how many days were used. |
 
 ## Events, IPO and news
 
@@ -106,7 +106,9 @@ Legend: ✅ done · 🟡 partial (works, with a stated data limit) · ⛔ blocke
 
 ## Keeping the client's work low
 
-- One update command refreshes everything; the app reminds when data is older than four days.
+- Automatic updates refresh the public data on launch and every six hours while
+  the app is open; the client never runs a command or copies CSV files.
+- Manual CSV import is an offline fallback only.
 - Alerts arrive as desktop notifications; the smart brief summarises a session on one page.
 - Screener presets turn each requested screen into one click; every table exports to CSV.
 - Every number shows its source, as-of time and whether it is unofficial or derived.

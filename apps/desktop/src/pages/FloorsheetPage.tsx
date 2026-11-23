@@ -47,7 +47,6 @@ type FloorsheetTab = "stocks" | "brokers" | "stock-broker" | "bulk" | "three-day
 const ROW_CAP = 200;
 const CRORE = 10_000_000;
 const FREE_SOURCE_URL = "https://merolagani.com/Floorsheet.aspx";
-const BULK_COMMAND = "pnpm personal:bulk";
 
 function rs(value: number | null | undefined): string {
   if (value === null || value === undefined || !Number.isFinite(value)) return "—";
@@ -177,10 +176,11 @@ export function FloorsheetPage({
     return (
       <EmptyState title="No floorsheet stored">
         <p>
-          Floorsheet trades are fetched from the public floorsheet page by{" "}
-          <code>{BULK_COMMAND}</code> (or <code>pnpm personal:update</code> with
-          the public web datasets enabled). The free source publishes only the
-          latest trading day, so history builds up one day per run.
+          Floorsheet trades are fetched from the public floorsheet page
+          automatically in the background while the app is open. The free
+          source publishes only the latest trading day, so history builds up
+          one trading day per update. Open the <strong>Data</strong> page to
+          check status or refresh now.
         </p>
       </EmptyState>
     );
@@ -235,7 +235,7 @@ export function FloorsheetPage({
         </strong>{" "}
         ({oldest === newest ? oldest : `${oldest} → ${newest}`}). The free source
         publishes only the latest trading day per fetch, so history accumulates
-        only when the operator runs <code>{BULK_COMMAND}</code> each trading day.
+        one day per automatic update while the app is open on a trading day.
         Missed days cannot be back-filled from this source and are never
         interpolated.
       </Notice>
@@ -1226,8 +1226,9 @@ function ThreeDayTopBuy({
         {used < 3 ? (
           <>
             <strong>Only {used} stored trading day{used === 1 ? "" : "s"}</strong> up to{" "}
-            {currentDate} — this window uses {label}, not 3 days. Run{" "}
-            <code>{BULK_COMMAND}</code> on each trading day to build history.
+            {currentDate}. This window uses {label}, not 3 days. Each automatic
+            update while the app is open adds the latest trading day to the
+            history.
           </>
         ) : (
           <>Window: {label}.</>

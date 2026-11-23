@@ -19,12 +19,13 @@ separate product edition, not a substitute for a licensed data agreement. See
   `FREE_EDITION_POLICY`. The licensed policy still blocks it.
 - Offline after import: charts, indicators, screener, watchlist, and portfolio
   read the local store without a network call.
-- Optional acquisition helpers for public pages: `pnpm personal:details` reads
-  company profiles and key ratios from ShareSansar and Merolagani, and
-  `pnpm personal:bulk` reads the public market summary, sub-indices, current-day
+- Acquisition helpers for public pages: the desktop app runs them in the
+  background on launch and every six hours while it is open. `personal:details`
+  reads company profiles and key ratios from ShareSansar and Merolagani, and
+  `personal:bulk` reads the public market summary, sub-indices, current-day
   prices and floorsheet, news, the IPO pipeline, and mutual-fund NAVs. Both
   write canonical CSV and raw source snapshots; they never write the database
-  directly. The operator runs them explicitly.
+  directly. The operator can also run them by hand from the commands below.
 
 ## What it is not
 
@@ -115,6 +116,12 @@ is reported unavailable, and the rest of the market page still works.
 
 ## Commands
 
+Normal use needs no manual import. The packaged desktop app checks the public
+archive on launch and every six hours while it is open, imports new end-of-day
+sessions, and keeps the raw snapshots. Manual CSV import is an offline fallback
+only. The commands below are the developer and operator interface to the same
+pipeline.
+
 ```bash
 cp .env.example .env
 # In .env: DATA_EDITION=free
@@ -148,6 +155,12 @@ pnpm personal:analyze NABIL
 `personal:details` afterwards and then `personal:sync` to import the profiles
 and corporate actions. `personal:details` is the slow step: it spaces requests
 to the public sites and can take 10–25 minutes for all active equities.
+
+The packaged app performs the same pipeline automatically, so the client never
+runs these commands. A failed web pass never stops the archive import, and a
+failed details pass never fails the refresh. If the remote archive cannot be
+checked, the app keeps using the last downloaded copy and reports that it is
+using cached data until the next successful check.
 
 The same import is available in the UI's **Data → Import wizard**, including a
 file checklist, a preview that writes nothing, and the import history.

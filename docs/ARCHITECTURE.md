@@ -29,7 +29,7 @@ packages/core                contracts, policy, registry, service, metadata
         ├── packages/providers   mock | manual CSV | free-source | licensed REST | command
         ├── packages/store       provenance-aware local SQLite cache
         ├── packages/analytics   pure offline indicators, screener, portfolio P&L
-        ├── packages/personal    free-source import/sync CLI
+        ├── packages/personal    free-source import/sync CLI + automatic refresh pipeline
         └── packages/validation  Phase 0 checks, reports, CLI
 ```
 
@@ -89,8 +89,9 @@ during vendor evaluation.
   `/api/health`, `/api/meta`, `/api/coverage`, `/api/companies`, `/api/quotes`,
   `/api/summary`, `/api/candles`, `/api/analysis`, `/api/screener`,
   `/api/portfolio`, `/api/portfolio/transactions`, `/api/watchlist`,
-  `/api/import/status`, `/api/import/preview`, `/api/import/history`, and
-  `/api/import/run`. It also serves the built renderer.
+  `/api/import/status`, `/api/import/preview`, `/api/import/history`,
+  `/api/import/run`, `/api/refresh/status`, and `/api/refresh/run`. It also
+  serves the built renderer.
 - `@stock/desktop` is the React/Vite renderer plus the Electron shell. Electron
   starts a bundled copy of the API in a child process, waits for `/api/health`,
   then loads the local URL. No renderer code imports Node or SQLite directly.
@@ -246,6 +247,46 @@ and the licensed namespace becomes the default only after it passes the gate.
 `@stock/personal` is the only market-data writer in the Free Edition. It runs
 when `DATA_EDITION=free`, or in development with `ALLOW_UNOFFICIAL_DATA=true`.
 The licensed edition never uses it.
+
+### Automatic refresh service
+
+The packaged app never asks the client to run a command. `packages/personal`
+exports `runPersonalRefresh`, one pipeline shared by the CLI and the desktop
+app. `packages/api/src/refresh.ts` schedules it:
+
+1. **archive**: fetch the public `binayabaral/nepal-market-data` tarball over
+   HTTPS (git is not required), validate it, and keep the raw snapshot.
+2. **bulk**: fetch the public market summary, sub-indices, current-day prices,
+   floorsheet, news, IPO pipeline and mutual-fund NAVs.
+3. **details**: optional slow pass for company profiles, key ratios,
+   corporate actions and events.
+4. **sync**: validate and import everything into the local store in the same
+   provider namespace.
+
+The service runs on launch and every six hours while the app is open, one run
+at a time. It never runs while a manual import is active, backs off after
+failures, and stops when the app closes. A failed bulk or details pass still
+imports the archive; a failed details pass never fails the refresh. If the
+remote archive cannot be checked, the previous checkout is reused and the
+refresh result carries a clear "using cached data" note. Imported rows stay
+`UNVERIFIED` and the raw archive and web responses are preserved.
+
+Configuration: `NEPSE_AUTO_REFRESH` (`0` disables),
+`NEPSE_AUTO_REFRESH_INTERVAL_MINUTES` (default 360, minimum 15),
+`NEPSE_AUTO_REFRESH_INITIAL_DELAY_MS` (default 8000), and `NEPSE_AUTO_DETAILS`
+(`1` includes the slow pass, default off).
+
+State endpoints:
+
+- `GET /api/refresh/status`: enabled/running flag, phase, progress, last
+  success, human-readable last error, next check time, consecutive failures,
+  interval, commit, latest session, and the last run summary (counts, warnings,
+  cached flag and cache note).
+- `POST /api/refresh/run`: starts a run and returns `202` immediately. The
+  body may set `{ "force": true }` to ignore caches and `{ "details": true }`
+  to include the slow company-profile, fundamentals and company-events pass.
+  A run is refused with `409` while another import is active, and with `403`
+  outside the Free Edition.
 
 The store also provides the data-integrity machinery the UI relies on:
 

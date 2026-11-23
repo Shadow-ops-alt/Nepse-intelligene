@@ -33,6 +33,7 @@ import {
 } from "@stock/analytics";
 import { syncPersonalData } from "@stock/personal";
 import { createLiveService, liveEnabledFromEnv, LIVE_DISCLAIMER, LIVE_SOURCE } from "./live";
+import { createAutoRefresh, type AutoRefreshHandle } from "./refresh";
 import { parseCsvRecords } from "./csv";
 
 export interface ApiConfig {
@@ -40,6 +41,11 @@ export interface ApiConfig {
   dataDir: string;
   webDir?: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Start the background data refresher. Off by default so library and test
+   * callers never touch the network; the desktop shell and dev server set it.
+   */
+  autoRefresh?: boolean;
 }
 
 export interface ApiHandle {
@@ -47,6 +53,7 @@ export interface ApiHandle {
   store: PersonalStore;
   providerId: string;
   edition: DataEdition;
+  refresh: AutoRefreshHandle;
 }
 
 const CONTENT_TYPES: Record<string, string> = {
@@ -54,6 +61,7 @@ const CONTENT_TYPES: Record<string, string> = {
   ".js": "text/javascript; charset=utf-8",
   ".css": "text/css; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json",
   ".svg": "image/svg+xml",
   ".png": "image/png",
   ".ico": "image/x-icon",
@@ -277,12 +285,20 @@ function serveStatic(
   }
 
   const body = readFileSync(filePath);
+  const extension = extname(filePath);
+  // Hashed Vite assets can be cached forever; the shell, service worker and
+  // manifest must be revalidated so a new build is picked up.
+  const revalidate =
+    extension === ".html" ||
+    extension === ".webmanifest" ||
+    filePath.endsWith(`${sep}sw.js`);
   response.writeHead(200, {
-    "content-type":
-      CONTENT_TYPES[extname(filePath)] ?? "application/octet-stream",
-    "cache-control": filePath.endsWith("index.html")
+    "content-type": CONTENT_TYPES[extension] ?? "application/octet-stream",
+    "cache-control": revalidate
       ? "no-cache"
-      : "public, max-age=31536000, immutable",
+      : filePath.includes(`${sep}assets${sep}`)
+        ? "public, max-age=31536000, immutable"
+        : "public, max-age=3600",
     "content-length": body.length,
   });
   response.end(body);
@@ -571,7 +587,12 @@ export function createApiServer(config: ApiConfig): ApiHandle {
     store.upsertIntradayCandles({ data: candles, meta }, feed.kind);
     return candles.length;
   };
-  let syncInFlight = false;
+  // One writer at a time: a manual CSV import and the background refresher
+  // share this gate so they can never import into the store concurrently.
+  const syncGate = {
+    inFlight: false,
+    reason: null as string | null,
+  };
   const readCompanyEvents = createCompanyEventsReader(config.dataDir);
   const sourceClassification = () =>
     provider ? classificationForSourceType(provider.descriptor.sourceType) : "MISSING";
@@ -624,6 +645,20 @@ export function createApiServer(config: ApiConfig): ApiHandle {
     screenerCache.clear();
     screenerKeyMemo.clear();
   };
+
+  const autoRefresh = createAutoRefresh({
+    enabled:
+      config.autoRefresh === true &&
+      (policy.edition ?? "licensed") === "free" &&
+      Boolean(provider),
+    dataDir: config.dataDir,
+    store,
+    provider: provider ?? null,
+    policy,
+    env,
+    isBusy: () => syncGate.inFlight,
+    onChanged: () => invalidateScreener(),
+  });
 
   const computeScreener = async (
     namespace: string,
@@ -777,6 +812,7 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             },
             store: storeSummary,
             dataState,
+            refresh: autoRefresh.status(),
           });
           return;
         }
@@ -1865,7 +1901,8 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             indices: inspection.indices,
             ready: inspection.ready,
             missing: inspection.missing,
-            syncing: syncInFlight,
+            syncing: syncGate.inFlight,
+            syncReason: syncGate.reason,
             store: store.summary(providerId),
           });
           return;
@@ -1876,6 +1913,57 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             providerId,
             entries: store.getImportAudit(20),
           });
+          return;
+        }
+
+        if (request.method === "GET" && url.pathname === "/api/refresh/status") {
+          sendJson(response, 200, autoRefresh.status());
+          return;
+        }
+
+        if (request.method === "POST" && url.pathname === "/api/refresh/run") {
+          if ((policy.edition ?? "licensed") !== "free") {
+            sendJson(response, 403, {
+              error:
+                "automatic updates are only enabled in the Free Edition (DATA_EDITION=free)",
+            });
+            return;
+          }
+          if (!provider) {
+            sendJson(response, 500, {
+              error: providerError ?? "free-source provider unavailable",
+            });
+            return;
+          }
+          if (!autoRefresh.status().enabled) {
+            sendJson(response, 409, {
+              error:
+                "automatic updates are disabled (set NEPSE_AUTO_REFRESH=1 to enable)",
+            });
+            return;
+          }
+          if (autoRefresh.status().running || syncGate.inFlight) {
+            sendJson(response, 409, { error: "an import is already running" });
+            return;
+          }
+          const body = await readBody(request);
+          // Start the run and return immediately; the UI polls the status.
+          void autoRefresh
+            .runNow("manual", {
+              force: body.force === true,
+              details: body.details === true,
+            })
+            .catch(() => {
+              // The failure is recorded in the status object.
+            });
+          // runNow sets `running` synchronously before its first await, so a
+          // false value here means the run was rejected (for example a
+          // scheduled refresh started during readBody) and did not begin.
+          if (!autoRefresh.status().running) {
+            sendJson(response, 409, { error: "an import is already running" });
+            return;
+          }
+          sendJson(response, 202, { started: true, status: autoRefresh.status() });
           return;
         }
 
@@ -1959,7 +2047,9 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             });
             return;
           }
-          if (syncInFlight) {
+          // The background refresher also writes this store and data folder.
+          // Refuse while it is running so two imports never overlap.
+          if (syncGate.inFlight || autoRefresh.status().running) {
             sendJson(response, 409, { error: "a sync is already running" });
             return;
           }
@@ -1995,7 +2085,15 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             return;
           }
 
-          syncInFlight = true;
+          // Re-check after the body await: a scheduled refresh may have
+          // started while the request body streamed in.
+          if (syncGate.inFlight || autoRefresh.status().running) {
+            sendJson(response, 409, { error: "a sync is already running" });
+            return;
+          }
+
+          syncGate.inFlight = true;
+          syncGate.reason = "manual import";
           try {
             const result = await syncPersonalData({
               provider,
@@ -2025,7 +2123,8 @@ export function createApiServer(config: ApiConfig): ApiHandle {
               error: detail || "import failed",
             });
           } finally {
-            syncInFlight = false;
+            syncGate.inFlight = false;
+            syncGate.reason = null;
             invalidateScreener();
           }
           return;
@@ -2063,12 +2162,17 @@ export function createApiServer(config: ApiConfig): ApiHandle {
     })();
   });
 
-  server.on("close", () => store.close());
+  server.once("listening", () => autoRefresh.start());
+  server.on("close", () => {
+    autoRefresh.stop();
+    store.close();
+  });
 
   return {
     server,
     store,
     providerId,
     edition: policy.edition ?? "licensed",
+    refresh: autoRefresh,
   };
 }

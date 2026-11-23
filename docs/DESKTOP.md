@@ -57,12 +57,52 @@ Inside that directory:
 
 ```
 personal.db      SQLite database (WAL mode)
-data/            operator-supplied CSV files and the import wizard target
+data/            canonical CSV files written by automatic updates
+data/reports/    import, bulk, details, provider-health and auto-refresh reports
+data/source/     raw archive and content-addressed web page snapshots
 ```
 
 Override with `PERSONAL_DB` and `PERSONAL_DATA_DIR`. `DATA_EDITION` defaults to
 `free` in the packaged app; set it to `licensed` only with a licensed provider
 configured.
+
+## Automatic updates
+
+The packaged app never asks the client to run a command or import CSV files.
+On launch and every six hours while the window is open, it runs the same
+pipeline as `pnpm personal:update`: download the public archive over HTTPS
+(no git required), fetch the public web datasets, validate every row, and
+import new end-of-day sessions into the local database. Watchlists, portfolios
+and notes are never touched. Imported rows stay `UNVERIFIED`, and the raw
+archive and web snapshots are kept under `data/source/`.
+
+- Updates run only while the app is open. They stop when it closes and resume
+  on the next launch.
+- One run at a time. A run waits while a manual import is writing to the same
+  store.
+- A failed web or details pass still imports the archive. A failed details pass
+  never fails the main refresh.
+- After repeated failures the app backs off before retrying.
+- If the remote archive cannot be checked, the app keeps using the last
+  downloaded copy and reports that it is using cached data.
+
+Configuration (defaults shown):
+
+```bash
+NEPSE_AUTO_REFRESH=1                          # 0 disables background checks
+NEPSE_AUTO_REFRESH_INTERVAL_MINUTES=360       # minimum 15
+NEPSE_AUTO_REFRESH_INITIAL_DELAY_MS=8000      # delay before the first check
+NEPSE_AUTO_DETAILS=0                          # 1 adds the slow profile pass
+```
+
+The local API exposes the updater at `GET /api/refresh/status` and
+`POST /api/refresh/run` (returns `202` and runs in the background). The Data
+page uses these endpoints to show progress, the last result, the next check
+time and a **Check now** button. **Fetch company profiles** starts a one-off
+run with the slower details pass, so a client can load company profiles,
+fundamentals and company events without setting an environment variable.
+
+Manual CSV import remains available in the Data page as an offline fallback.
 
 ## Interface
 

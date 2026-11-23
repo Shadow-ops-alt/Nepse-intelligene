@@ -273,10 +273,11 @@ export function MarketPage({
         }
       >
         <p>
-          The Free Edition does not download data by itself. Run{" "}
-          <code>pnpm personal:update</code> to fetch the public archive, or put{" "}
-          <code>companies.csv</code> and <code>ohlc/&lt;SYMBOL&gt;.csv</code> in
-          the app’s data folder and import them.
+          Automatic updates fetch public market data in the background while
+          the app is open. Open the <strong>Data</strong> page to check status
+          or refresh now. If you are offline, put companies.csv and{" "}
+          <code>ohlc/&lt;SYMBOL&gt;.csv</code> in the app’s data folder and
+          import them from the Data page.
         </p>
       </EmptyState>
     );
@@ -806,8 +807,9 @@ export function MarketPage({
           <Spinner label="Loading floorsheet" />
         ) : floorsheetTop.length === 0 ? (
           <EmptyState title="No floorsheet stored">
-            Run <code>pnpm personal:update</code> with the public web datasets
-            enabled.
+            Automatic updates fetch the public floorsheet in the background
+            while the app is open. Open the Data page to check status or
+            refresh now.
           </EmptyState>
         ) : (
           <div className="table-scroll short">

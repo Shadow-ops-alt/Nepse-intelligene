@@ -14,6 +14,7 @@ import {
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { parse } from "csv-parse/sync";
+import { prepareRepoOverHttp } from "./source-http";
 
 /**
  * Explicit acquisition + normalization for the public `nepal-market-data`
@@ -71,10 +72,13 @@ const execFileAsync = promisify(execFile);
 
 type Row = Record<string, string>;
 
+/** How the remote archive is fetched. */
+export type AcquireTransport = "auto" | "http" | "git";
+
 export interface AcquireOptions {
   /** Directory the app reads: companies.csv, ohlc/, indices/, quotes.csv. */
   outputDir: string;
-  /** Git clone cache. Defaults to <outputDir>/source/.cache. */
+  /** Git clone / tarball cache. Defaults to <outputDir>/source/.cache. */
   cacheDir?: string;
   /** Use an existing checkout instead of cloning/fetching. */
   sourceDir?: string;
@@ -84,6 +88,13 @@ export interface AcquireOptions {
   force?: boolean;
   /** Minimum minutes between remote fetches. Default 30. */
   maxAgeMinutes?: number;
+  /**
+   * Transport for a remote fetch. "auto" tries HTTPS (no git required) and
+   * falls back to git; the shipped desktop app relies on the HTTPS path.
+   */
+  transport?: AcquireTransport;
+  /** Receives human-readable fetch progress lines. */
+  onProgress?: (message: string) => void;
   now?: Date;
 }
 
@@ -121,6 +132,7 @@ interface RepoState {
   commit: string;
   retrievedAt: string;
   cached: boolean;
+  warning?: string;
 }
 
 interface MasterRow {
@@ -302,35 +314,38 @@ function writeJson(path: string, value: unknown): void {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-async function prepareRepo(
+/** A checkout left by an earlier run, used when every remote transport fails. */
+function cachedRepoState(
+  repoDir: string,
+  cacheDir: string,
+  now: Date,
+  warning: string,
+): RepoState | null {
+  if (!existsSync(join(repoDir, "data", "reference", "nepse-symbols.csv"))) {
+    return null;
+  }
+  let commit = "unknown";
+  let retrievedAt = now.toISOString();
+  try {
+    const marker = JSON.parse(
+      readFileSync(join(cacheDir, "last-fetch.json"), "utf8"),
+    ) as { commit?: string; checkedAt?: string };
+    if (marker.commit) commit = marker.commit;
+    if (marker.checkedAt) retrievedAt = marker.checkedAt;
+  } catch {
+    // Keep the defaults; the checkout itself is still usable.
+  }
+  return { repoDir, commit, retrievedAt, cached: true, warning };
+}
+
+async function prepareRepoOverGit(
   options: AcquireOptions,
   now: Date,
+  cacheDir: string,
+  repoDir: string,
+  sourceUrl: string,
+  ref: string,
 ): Promise<RepoState> {
-  const sourceUrl = options.sourceUrl ?? NEPSE_SOURCE_URL;
-  const ref = options.ref ?? "main";
-
-  if (options.sourceDir) {
-    const repoDir = resolve(options.sourceDir);
-    if (!existsSync(join(repoDir, "data", "reference", "nepse-symbols.csv"))) {
-      throw new Error(
-        `source checkout is missing data/reference/nepse-symbols.csv: ${repoDir}`,
-      );
-    }
-    const commit =
-      (await tryGit(["-C", repoDir, "rev-parse", "HEAD"], repoDir)) ??
-      `unversioned-${sha256File(
-        join(repoDir, "data", "reference", "nepse-symbols.csv"),
-      ).slice(0, 8)}`;
-    return {
-      repoDir,
-      commit,
-      retrievedAt: now.toISOString(),
-      cached: false,
-    };
-  }
-
-  const cacheDir = resolve(options.cacheDir ?? join(options.outputDir, "source", ".cache"));
-  const repoDir = join(cacheDir, "repo");
   const markerPath = join(cacheDir, "last-fetch.json");
   const maxAgeMs = Math.max(0, options.maxAgeMinutes ?? 30) * 60_000;
 
@@ -379,20 +394,29 @@ async function prepareRepo(
     );
     await git(["-C", repoDir, "reset", "--hard", "FETCH_HEAD"], repoDir);
   } else {
-    rmSync(repoDir, { recursive: true, force: true });
-    await git(
-      [
-        "clone",
-        "--depth",
-        "1",
-        "--single-branch",
-        "--branch",
-        ref,
-        sourceUrl,
-        repoDir,
-      ],
-      undefined,
-    );
+    // Clone beside the old checkout and swap only after a successful clone,
+    // so a failed fetch cannot destroy a usable tarball checkout.
+    const incoming = `${repoDir}.git-incoming-${process.pid}-${Date.now().toString(36)}`;
+    rmSync(incoming, { recursive: true, force: true });
+    try {
+      await git(
+        [
+          "clone",
+          "--depth",
+          "1",
+          "--single-branch",
+          "--branch",
+          ref,
+          sourceUrl,
+          incoming,
+        ],
+        undefined,
+      );
+      rmSync(repoDir, { recursive: true, force: true });
+      renameSync(incoming, repoDir);
+    } finally {
+      rmSync(incoming, { recursive: true, force: true });
+    }
   }
 
   const commit = await git(["-C", repoDir, "rev-parse", "HEAD"], repoDir);
@@ -402,8 +426,101 @@ async function prepareRepo(
     commit,
     sourceUrl,
     ref,
+    transport: "git",
   });
   return { repoDir, commit, retrievedAt, cached: false };
+}
+
+async function prepareRepo(
+  options: AcquireOptions,
+  now: Date,
+): Promise<RepoState> {
+  const sourceUrl = options.sourceUrl ?? NEPSE_SOURCE_URL;
+  const ref = options.ref ?? "main";
+
+  if (options.sourceDir) {
+    const repoDir = resolve(options.sourceDir);
+    if (!existsSync(join(repoDir, "data", "reference", "nepse-symbols.csv"))) {
+      throw new Error(
+        `source checkout is missing data/reference/nepse-symbols.csv: ${repoDir}`,
+      );
+    }
+    const commit =
+      (await tryGit(["-C", repoDir, "rev-parse", "HEAD"], repoDir)) ??
+      `unversioned-${sha256File(
+        join(repoDir, "data", "reference", "nepse-symbols.csv"),
+      ).slice(0, 8)}`;
+    return {
+      repoDir,
+      commit,
+      retrievedAt: now.toISOString(),
+      cached: false,
+    };
+  }
+
+  const cacheDir = resolve(
+    options.cacheDir ?? join(options.outputDir, "source", ".cache"),
+  );
+  const repoDir = join(cacheDir, "repo");
+  const transport = options.transport ?? "auto";
+  let httpError: unknown;
+
+  if (transport !== "git") {
+    try {
+      const result = await prepareRepoOverHttp({
+        repoDir,
+        cacheDir,
+        sourceUrl,
+        ref,
+        ...(options.force !== undefined ? { force: options.force } : {}),
+        ...(options.maxAgeMinutes !== undefined
+          ? { maxAgeMinutes: options.maxAgeMinutes }
+          : {}),
+        ...(options.onProgress ? { onProgress: options.onProgress } : {}),
+        now,
+      });
+      return {
+        repoDir: result.repoDir,
+        commit: result.commit,
+        retrievedAt: result.retrievedAt,
+        cached: result.cached,
+        ...(result.warning ? { warning: result.warning } : {}),
+      };
+    } catch (error) {
+      httpError = error;
+      if (transport === "http") throw error;
+      options.onProgress?.(
+        `HTTPS archive fetch failed (${message(error)}); trying the git fallback`,
+      );
+    }
+  }
+
+  try {
+    return await prepareRepoOverGit(
+      options,
+      now,
+      cacheDir,
+      repoDir,
+      sourceUrl,
+      ref,
+    );
+  } catch (gitError) {
+    const failures = httpError
+      ? `over HTTP (${message(httpError)}) or git (${message(gitError)})`
+      : `over git (${message(gitError)})`;
+    const cached = cachedRepoState(
+      repoDir,
+      cacheDir,
+      now,
+      `Could not refresh the archive ${failures}; using the cached checkout.`,
+    );
+    if (cached) return cached;
+    throw new Error(
+      httpError
+        ? `Could not fetch the archive over HTTP (${message(httpError)}) or git (${message(gitError)})`
+        : `Could not fetch the archive (${message(gitError)})`,
+    );
+  }
 }
 
 function ensureSnapshot(
@@ -734,6 +851,7 @@ export async function acquireNepseSource(
     const masterBySymbol = new Map(master.map((row) => [row.symbol, row]));
 
     const warnings: string[] = [];
+    if (repo.warning) warnings.push(repo.warning);
     const exclusionReasons = new Map<string, number>();
     const exclusionsBySymbol = new Map<string, number>();
     const excludedRows: ExcludedRow[] = [];

@@ -513,7 +513,7 @@ export function ScreenerPage({
               disabled={caps.values.size === 0}
               title={
                 caps.values.size === 0
-                  ? "No market caps yet: shares outstanding comes from company profiles (run pnpm personal:details, then sync)"
+                  ? "No market caps yet: shares outstanding comes from company profiles. Use Fetch company profiles on the Data page to load them."
                   : undefined
               }
               onChange={(event) => setCapClass(event.target.value as "all" | CapClass)}
