@@ -364,9 +364,19 @@ export function DataPage({
 
             {!refresh.enabled && (
               <Notice tone="warn">
-                Automatic updates are off. Set{" "}
-                <code>NEPSE_AUTO_REFRESH=1</code> before launching the app to
-                turn them back on, or use the offline import below.
+                {meta.edition === "free" ? (
+                  <>
+                    Automatic updates are off. Set{" "}
+                    <code>NEPSE_AUTO_REFRESH=1</code> before launching the app to
+                    turn them back on, or use the offline import below.
+                  </>
+                ) : (
+                  <>
+                    Automatic updates run in the Free Edition. This build is
+                    running the Licensed edition, so background updates are off.
+                    Use the offline import below, or launch a Free Edition build.
+                  </>
+                )}
               </Notice>
             )}
 

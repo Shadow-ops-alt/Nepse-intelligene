@@ -650,7 +650,9 @@ export function App() {
                   <strong>The local archive is {describeAge(ageDays)}.</strong>{" "}
                   {refresh.enabled
                     ? `Automatic updates are on; the next check is at ${formatCheckTime(refresh.nextCheckAt)}.`
-                    : "Automatic updates are off. Open the Data page to refresh."}
+                    : meta?.edition === "free"
+                      ? "Automatic updates are off. Open the Data page to refresh."
+                      : "Automatic updates run in the Free Edition. Open the Data page for manual options."}
                 </div>
                 {refresh.enabled && (
                   <button

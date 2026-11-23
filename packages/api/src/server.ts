@@ -12,6 +12,10 @@ try {
   // .env is optional.
 }
 
+// The dev server and the packaged shell both run the Free Edition by default.
+// An explicit DATA_EDITION in the environment or .env still wins.
+process.env.DATA_EDITION ??= "free";
+
 const port = Number(process.env.API_PORT ?? 4310);
 const dbPath = resolve(
   invocationDir,

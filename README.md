@@ -11,6 +11,15 @@ provider-independent market-data layer.
 > permissions exist. See [docs/FREE_EDITION.md](docs/FREE_EDITION.md) and
 > [docs/PHASE0_FINDINGS.md](docs/PHASE0_FINDINGS.md).
 
+## Download
+
+The Windows x64 installer is published as a GitHub Release asset:
+
+- [Latest release](https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest)
+
+The installer is unsigned, so Windows SmartScreen may ask for confirmation on
+first launch.
+
 ## Principles
 
 - One `MarketDataProvider` interface. Adapters are replaceable.
