@@ -258,6 +258,54 @@ describe("candlestick patterns", () => {
     ];
     expect(names(soldiers)).toContain("three-white-soldiers");
   });
+
+  it("detects tweezers that reject the same level twice", () => {
+    const bottom = [
+      ...downtrend,
+      bar(dayString(6), 106, 107, 100, 101),
+      bar(dayString(7), 101, 106, 100, 105),
+    ];
+    expect(names(bottom)).toContain("tweezer-bottom");
+
+    const top = [
+      ...uptrend,
+      bar(dayString(6), 117, 122, 116, 121),
+      bar(dayString(7), 120, 122, 116, 117),
+    ];
+    expect(names(top)).toContain("tweezer-top");
+  });
+
+  it("detects three inside and three outside continuations", () => {
+    const insideUp = [
+      ...downtrend,
+      bar(dayString(6), 110, 111, 99, 100),
+      bar(dayString(7), 101, 105, 100.5, 104),
+      bar(dayString(8), 104, 112, 103, 111),
+    ];
+    expect(names(insideUp)).toContain("three-inside-up");
+
+    const insideDown = [
+      ...uptrend,
+      bar(dayString(6), 100, 112, 99, 111),
+      bar(dayString(7), 109, 110, 104, 105),
+      bar(dayString(8), 105, 106, 96, 97),
+    ];
+    expect(names(insideDown)).toContain("three-inside-down");
+
+    const outsideUp = [
+      bar(dayString(0), 106, 107, 99, 100),
+      bar(dayString(1), 99, 110, 98, 109),
+      bar(dayString(2), 109, 114, 108, 113),
+    ];
+    expect(names(outsideUp)).toContain("three-outside-up");
+
+    const outsideDown = [
+      bar(dayString(0), 100, 108, 99, 107),
+      bar(dayString(1), 108, 109, 98, 99),
+      bar(dayString(2), 99, 100, 94, 95),
+    ];
+    expect(names(outsideDown)).toContain("three-outside-down");
+  });
 });
 
 describe("signals and market statistics", () => {

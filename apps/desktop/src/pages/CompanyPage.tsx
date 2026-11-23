@@ -43,6 +43,7 @@ import {
   type Study,
 } from "../components/PriceChart";
 import { LiveIntradayChart } from "../components/LiveIntradayChart";
+import { PatternGuide } from "../components/PatternGuide";
 import { TIMEFRAME_OPTIONS, type ChartTimeframe } from "../live/types";
 import { Icon } from "../components/icons";
 import { CompanyDetail } from "../fundamentals/CompanyDetail";
@@ -119,6 +120,7 @@ export function CompanyPage({
           time: hit.timestamp.slice(0, 10),
           bias: hit.bias,
           label: hit.name,
+          span: hit.span,
         })),
     [profile],
   );
@@ -771,76 +773,83 @@ function PatternPanel({ candles, hits }: { candles: Candle[]; hits: PatternHit[]
     };
   }, [rows]);
 
-  if (rows.length === 0) {
-    return <EmptyState title="No patterns detected in the last 120 sessions" />;
-  }
-
   return (
     <div className="stack">
-      <MiniStats
-        items={[
-          { label: "Bullish", value: summary.bullish, tone: "up" },
-          { label: "Bearish", value: summary.bearish, tone: "down" },
-          { label: "Neutral", value: summary.neutral },
-          {
-            label: "Avg +5 after bull",
-            value: <Delta value={summary.bullishAvg} />,
-            hint: "this series only",
-          },
-          {
-            label: "Avg +5 after bear",
-            value: <Delta value={summary.bearishAvg} />,
-            hint: "this series only",
-          },
-        ]}
-      />
-      <div className="table-scroll short">
-        <table className="table">
-          <thead>
-            <tr>
-              <th>Session</th>
-              <th>Pattern</th>
-              <th>Bias</th>
-              <th className="right">Span</th>
-              <th className="right">Close</th>
-              <th className="right">Next 5 sessions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {rows.map(({ hit, close, forward5 }) => (
-              <tr key={`${hit.index}-${hit.id}`}>
-                <td className="muted">{hit.timestamp.slice(0, 10)}</td>
-                <td>
-                  <strong>{hit.name}</strong>
-                </td>
-                <td>
-                  <Badge
-                    tone={
-                      hit.bias === "bullish" ? "good" : hit.bias === "bearish" ? "bad" : "neutral"
-                    }
-                  >
-                    {hit.bias}
-                  </Badge>
-                </td>
-                <td className="right muted">{hit.span}</td>
-                <td className="right">{formatNumber(close)}</td>
-                <td className="right">
-                  {forward5 === null ? (
-                    <span className="subtle">pending</span>
-                  ) : (
-                    <Delta value={forward5} />
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      <p className="muted small">
-        “Next 5 sessions” is what actually happened after each pattern in this
-        series — a small, descriptive sample, not evidence that the pattern
-        predicts anything.
-      </p>
+      <PatternGuide hits={hits} />
+      {rows.length === 0 ? (
+        <EmptyState title="No patterns detected in the last 120 sessions" />
+      ) : (
+        <>
+          <MiniStats
+            items={[
+              { label: "Bullish", value: summary.bullish, tone: "up" },
+              { label: "Bearish", value: summary.bearish, tone: "down" },
+              { label: "Neutral", value: summary.neutral },
+              {
+                label: "Avg +5 after bull",
+                value: <Delta value={summary.bullishAvg} />,
+                hint: "this series only",
+              },
+              {
+                label: "Avg +5 after bear",
+                value: <Delta value={summary.bearishAvg} />,
+                hint: "this series only",
+              },
+            ]}
+          />
+          <div className="table-scroll short">
+            <table className="table">
+              <thead>
+                <tr>
+                  <th>Session</th>
+                  <th>Pattern</th>
+                  <th>Bias</th>
+                  <th className="right">Span</th>
+                  <th className="right">Close</th>
+                  <th className="right">Next 5 sessions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(({ hit, close, forward5 }) => (
+                  <tr key={`${hit.index}-${hit.id}`}>
+                    <td className="muted">{hit.timestamp.slice(0, 10)}</td>
+                    <td>
+                      <strong>{hit.name}</strong>
+                    </td>
+                    <td>
+                      <Badge
+                        tone={
+                          hit.bias === "bullish"
+                            ? "good"
+                            : hit.bias === "bearish"
+                              ? "bad"
+                              : "neutral"
+                        }
+                      >
+                        {hit.bias}
+                      </Badge>
+                    </td>
+                    <td className="right muted">{hit.span}</td>
+                    <td className="right">{formatNumber(close)}</td>
+                    <td className="right">
+                      {forward5 === null ? (
+                        <span className="subtle">pending</span>
+                      ) : (
+                        <Delta value={forward5} />
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="muted small">
+            “Next 5 sessions” is what actually happened after each pattern in this
+            series — a small, descriptive sample, not evidence that the pattern
+            predicts anything.
+          </p>
+        </>
+      )}
     </div>
   );
 }

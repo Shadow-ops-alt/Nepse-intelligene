@@ -39,6 +39,7 @@ import { Segmented } from "./ui";
 import {
   ChartDrawings,
   DRAWING_COLORS,
+  TOOL_HINT,
   TOOL_LABEL,
   type AutoShape,
   type DrawingTool,
@@ -157,6 +158,8 @@ export interface ChartMarker {
   time: string;
   bias: "bullish" | "bearish" | "neutral";
   label: string;
+  /** Sessions the pattern spans (1–3). Omitted or 1 for a single candle. */
+  span?: number;
 }
 
 const EMPTY_MARKERS: ChartMarker[] = [];
@@ -211,9 +214,18 @@ const DRAW_TOOLS: Array<{ tool: DrawingTool; glyph: string }> = [
   { tool: "hline", glyph: "―" },
   { tool: "hray", glyph: "⟶" },
   { tool: "vline", glyph: "│" },
+  { tool: "cross", glyph: "✛" },
   { tool: "rect", glyph: "▭" },
+  { tool: "ellipse", glyph: "◯" },
+  { tool: "triangle", glyph: "△" },
   { tool: "channel", glyph: "⫽" },
   { tool: "fib", glyph: "Fib" },
+  { tool: "fibext", glyph: "F↗" },
+  { tool: "fibchannel", glyph: "F⫽" },
+  { tool: "pitchfork", glyph: "⑂" },
+  { tool: "arrow", glyph: "↦" },
+  { tool: "polyline", glyph: "⌁" },
+  { tool: "brush", glyph: "✍" },
   { tool: "measure", glyph: "⇕%" },
   { tool: "text", glyph: "T" },
 ];
@@ -310,6 +322,7 @@ export function PriceChart({
   );
   const [analysis, setAnalysis] = useState<Analysis[]>(defaultAnalysis);
   const [showMarkers, setShowMarkers] = useState(markers.length > 0);
+  const [showPatternZones, setShowPatternZones] = useState(false);
   const [legend, setLegend] = useState<LegendState | null>(null);
   const [panel, setPanel] = useState<"none" | "indicators" | "analysis">("none");
   const [tool, setTool] = useState<DrawingTool>("cursor");
@@ -418,6 +431,49 @@ export function PriceChart({
     }
     return shapes;
   }, [series, analysis, palette]);
+
+  // Multi-candle patterns: shade the two or three candles that together form
+  // each detected pattern. Only the most recent hits are drawn so a long
+  // history cannot bury the price action.
+  const patternShapes = useMemo<AutoShape[]>(() => {
+    if (!showPatternZones || variant !== "candles") return [];
+    const indexByTime = new Map(dates.map((date, index) => [date, index]));
+    const recent = markers.filter((marker) => (marker.span ?? 1) > 1).slice(-12);
+    const shapes: AutoShape[] = [];
+    for (const marker of recent) {
+      const end = indexByTime.get(marker.time);
+      if (end === undefined) continue;
+      const fromIndex = Math.max(0, end - ((marker.span ?? 1) - 1));
+      let low = Infinity;
+      let high = -Infinity;
+      for (let index = fromIndex; index <= end; index += 1) {
+        const candle = series[index];
+        if (!candle) continue;
+        low = Math.min(low, candle.low);
+        high = Math.max(high, candle.high);
+      }
+      if (!Number.isFinite(low) || !Number.isFinite(high) || low >= high) continue;
+      shapes.push({
+        kind: "zone",
+        low,
+        high,
+        fromIndex,
+        toIndex: end,
+        color:
+          marker.bias === "bullish"
+            ? palette.up
+            : marker.bias === "bearish"
+              ? palette.down
+              : palette.text,
+      });
+    }
+    return shapes;
+  }, [showPatternZones, variant, markers, dates, series, palette]);
+
+  const autoShapes = useMemo(
+    () => [...analysisShapes, ...patternShapes],
+    [analysisShapes, patternShapes],
+  );
 
   const analysisMarkers = useMemo<SeriesMarker<Time>[]>(() => {
     const list: SeriesMarker<Time>[] = [];
@@ -929,6 +985,17 @@ export function PriceChart({
                   Candle patterns
                 </button>
               )}
+              {markers.some((marker) => (marker.span ?? 1) > 1) && (
+                <button
+                  type="button"
+                  className="toggle-chip"
+                  aria-pressed={showPatternZones}
+                  title="Shade the two or three candles that form each multi-candle pattern"
+                  onClick={() => setShowPatternZones((value) => !value)}
+                >
+                  Pattern zones
+                </button>
+              )}
             </>
           )}
           {drawingKey !== null && variant === "candles" && (
@@ -1101,7 +1168,7 @@ export function PriceChart({
           <span className="muted tiny">
             {tool === "cursor"
               ? `${drawCount} drawing${drawCount === 1 ? "" : "s"} · drag to move · Del to remove`
-              : `${TOOL_LABEL[tool]}: click start, click end · Esc to cancel`}
+              : `${TOOL_LABEL[tool]}: ${TOOL_HINT[tool]} · Esc to cancel`}
           </span>
         </div>
       )}
@@ -1185,7 +1252,8 @@ export function PriceChart({
                 }`}
               >
                 {marker.bias === "bullish" ? "▲" : marker.bias === "bearish" ? "▼" : "●"}{" "}
-                {marker.label} ({markerCode(marker.label)})
+                {marker.label} ({markerCode(marker.label)}
+                {marker.span && marker.span > 1 ? ` · ${marker.span} candles` : ""})
               </span>
             ))}
         </div>
@@ -1197,14 +1265,14 @@ export function PriceChart({
         }`}
       >
         <div className="price-chart" ref={container} />
-        {(drawingEnabled || analysisShapes.length > 0) && (
+        {(drawingEnabled || autoShapes.length > 0) && (
           <ChartDrawings
             chart={handles?.chart ?? null}
             series={handles?.price ?? null}
             dates={dates}
             version={handles?.version ?? 0}
             storageKey={drawingEnabled ? drawingKey : null}
-            auto={analysisShapes}
+            auto={autoShapes}
             tool={drawingEnabled ? tool : "cursor"}
             onToolChange={setTool}
             color={drawColor}

@@ -69,9 +69,10 @@ published and stay unavailable.
   sessions-per-year measured from the series (not an assumed 252),
   annualised volatility, max/current drawdown, beta and correlation on common
   dates, calendar period returns, monthly returns without bridging gaps,
-  classic pivots, 20 candlestick patterns (doji family, hammer/hanging man,
+  classic pivots, 26 candlestick patterns (doji family, hammer/hanging man,
   inverted hammer/shooting star, marubozu, spinning top, engulfing, harami,
-  piercing/dark cloud, morning/evening star, three soldiers/crows), golden and
+  piercing/dark cloud, tweezers, morning/evening star, three inside/outside,
+  three soldiers/crows), golden and
   death crosses, a transparent signal tally, and market/sector breadth.
 - `screenCandles` rows now include 1M/3M/1Y returns, 3M volatility, ATR %,
   MACD state, 1Y max drawdown, 52-week position, recent cross, last-session

@@ -18,9 +18,18 @@ export type DrawingTool =
   | "hline"
   | "hray"
   | "vline"
+  | "cross"
   | "rect"
+  | "ellipse"
+  | "triangle"
   | "channel"
   | "fib"
+  | "fibext"
+  | "fibchannel"
+  | "pitchfork"
+  | "arrow"
+  | "polyline"
+  | "brush"
   | "measure"
   | "text";
 
@@ -55,17 +64,32 @@ export interface AutoShape {
   dashed?: boolean;
 }
 
-const TWO_POINT: ReadonlySet<DrawingTool> = new Set([
-  "trend",
-  "ray",
-  "extended",
-  "rect",
-  "channel",
-  "fib",
-  "measure",
-]);
+/** Fixed clicks per tool. 0 means variable length (polyline / brush). */
+const POINT_COUNT: Partial<Record<Exclude<DrawingTool, "cursor">, number>> = {
+  hline: 1,
+  hray: 1,
+  vline: 1,
+  cross: 1,
+  text: 1,
+  trend: 2,
+  ray: 2,
+  extended: 2,
+  rect: 2,
+  ellipse: 2,
+  arrow: 2,
+  fib: 2,
+  measure: 2,
+  triangle: 3,
+  channel: 3,
+  fibext: 3,
+  fibchannel: 3,
+  pitchfork: 3,
+  polyline: 0,
+  brush: 0,
+};
 
 const FIB_LEVELS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1];
+const FIB_EXTENSION_LEVELS = [0, 0.618, 1, 1.618, 2.618];
 
 export const DRAWING_COLORS = ["#3355e0", "#e8890c", "#0a8a57", "#d23347", "#8b3fd9", "#0b9bb5"];
 
@@ -77,11 +101,45 @@ export const TOOL_LABEL: Record<DrawingTool, string> = {
   hline: "Horizontal line",
   hray: "Horizontal ray",
   vline: "Vertical line",
+  cross: "Cross line",
   rect: "Rectangle / zone",
+  ellipse: "Ellipse",
+  triangle: "Triangle",
   channel: "Parallel channel",
   fib: "Fib retracement",
+  fibext: "Fib extension",
+  fibchannel: "Fib channel",
+  pitchfork: "Pitchfork",
+  arrow: "Arrow",
+  polyline: "Polyline",
+  brush: "Brush",
   measure: "Measure",
   text: "Text note",
+};
+
+/** Short instruction shown in the toolbar for the active tool. */
+export const TOOL_HINT: Record<DrawingTool, string> = {
+  cursor: "drag to move · Del to remove",
+  trend: "click start, click end · drag also works",
+  ray: "click start, click end",
+  extended: "click start, click end",
+  hline: "click a price",
+  hray: "click a start point",
+  vline: "click a session",
+  cross: "click to place crosshair lines",
+  rect: "click a corner, then the opposite corner",
+  ellipse: "click a corner, then size the ellipse",
+  triangle: "click three corners",
+  channel: "click two points for the base, then the offset",
+  fib: "click the swing high and low",
+  fibext: "click three points: leg start, leg end, extension base",
+  fibchannel: "click two points, then the channel offset",
+  pitchfork: "click the pivot and two reaction points",
+  arrow: "click start, click the arrow head",
+  polyline: "click points · double-click or Enter to finish",
+  brush: "drag to draw freehand",
+  measure: "click start, click end to measure",
+  text: "click to place a note",
 };
 
 function storageKeyFor(key: string): string {
@@ -119,6 +177,14 @@ function distanceToSegment(p: Px, a: Px, b: Px): number {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+function polylineDistance(p: Px, points: Px[]): number {
+  let best = Infinity;
+  for (let i = 1; i < points.length; i += 1) {
+    best = Math.min(best, distanceToSegment(p, points[i - 1]!, points[i]!));
+  }
+  return best;
+}
+
 /** Extend segment a→b to the canvas edges (both directions, or forward only). */
 function extendLine(a: Px, b: Px, width: number, height: number, both: boolean): [Px, Px] {
   const dx = b.x - a.x;
@@ -131,6 +197,28 @@ function extendLine(a: Px, b: Px, width: number, height: number, both: boolean):
   const end = { x: a.x + ux * big, y: a.y + uy * big };
   const start = both ? { x: a.x - ux * big, y: a.y - uy * big } : a;
   return [start, end];
+}
+
+/** Point on the ray from `origin` in direction `dir` where it leaves the pane. */
+function rayToEdge(origin: Px, dir: Px, width: number, height: number): Px {
+  if (Math.abs(dir.x) < 1e-6) {
+    const y = dir.y >= 0 ? height : 0;
+    return { x: origin.x, y };
+  }
+  const edge = dir.x > 0 ? width : 0;
+  const t = (edge - origin.x) / dir.x;
+  return { x: edge, y: origin.y + dir.y * t };
+}
+
+function arrowHead(ctx: CanvasRenderingContext2D, from: Px, to: Px): void {
+  const angle = Math.atan2(to.y - from.y, to.x - from.x);
+  const size = 9;
+  ctx.beginPath();
+  ctx.moveTo(to.x, to.y);
+  ctx.lineTo(to.x - size * Math.cos(angle - Math.PI / 7), to.y - size * Math.sin(angle - Math.PI / 7));
+  ctx.lineTo(to.x - size * Math.cos(angle + Math.PI / 7), to.y - size * Math.sin(angle + Math.PI / 7));
+  ctx.closePath();
+  ctx.fill();
 }
 
 export function ChartDrawings({
@@ -175,8 +263,14 @@ export function ChartDrawings({
   const history = useRef<Drawing[][]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [draft, setDraft] = useState<Drawing | null>(null);
+  const [hover, setHover] = useState<AnchorPoint | null>(null);
+  const draftRef = useRef<Drawing | null>(null);
+  draftRef.current = draft;
+  const painting = useRef(false);
   const [textEdit, setTextEdit] = useState<{ x: number; y: number; point: AnchorPoint } | null>(null);
   const drag = useRef<{ id: string; start: AnchorPoint; original: AnchorPoint[]; pointIndex: number | null } | null>(null);
+  /** Raw pointer-down pixel, used to tell a click from a press-drag. */
+  const downAt = useRef<Px | null>(null);
   const frame = useRef<number | null>(null);
 
   const indexByDate = useRef(new Map<string, number>());
@@ -188,11 +282,29 @@ export function ChartDrawings({
     setDrawings(storageKey ? loadDrawings(storageKey) : []);
     history.current = [];
     setSelected(null);
+    setDraft(null);
+    setHover(null);
+    painting.current = false;
   }, [storageKey]);
 
   useEffect(() => {
     onCountChange?.(drawings.length);
   }, [drawings, onCountChange]);
+
+  // Leaving or switching a drawing tool cancels any half-finished shape.
+  useEffect(() => {
+    const current = draftRef.current;
+    if (current && current.tool !== tool) {
+      setDraft(null);
+      setHover(null);
+      painting.current = false;
+    }
+    if (tool === "cursor") {
+      setDraft(null);
+      setHover(null);
+      painting.current = false;
+    }
+  }, [tool]);
 
   const commit = useCallback(
     (next: Drawing[]) => {
@@ -337,7 +449,15 @@ export function ChartDrawings({
       }
     }
 
-    const all = draft ? [...drawings, draft] : drawings;
+    // The hover point previews the next click of a multi-point drawing.
+    const draftPoints =
+      draft === null
+        ? []
+        : draft.tool === "brush" || draft.tool === "polyline"
+          ? [...draft.points, ...(draft.tool === "polyline" && hover ? [hover] : [])]
+          : [...draft.points, ...(hover ? [hover] : [])];
+    const all: Drawing[] = draft ? [...drawings, { ...draft, points: draftPoints }] : drawings;
+
     for (const drawing of all) {
       const pts = drawing.points.map(toPx);
       if (pts.some((p) => p === null)) continue;
@@ -379,14 +499,53 @@ export function ChartDrawings({
           ctx.lineTo(a.x, paneHeight);
           ctx.stroke();
           break;
+        case "cross":
+          ctx.globalAlpha = 0.85;
+          ctx.moveTo(0, a.y);
+          ctx.lineTo(paneWidth, a.y);
+          ctx.moveTo(a.x, 0);
+          ctx.lineTo(a.x, paneHeight);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
         case "rect":
           ctx.globalAlpha = 0.15;
           ctx.fillRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
           ctx.globalAlpha = 1;
           ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
           break;
+        case "ellipse": {
+          const cx = (a.x + b.x) / 2;
+          const cy = (a.y + b.y) / 2;
+          const rx = Math.abs(b.x - a.x) / 2;
+          const ry = Math.abs(b.y - a.y) / 2;
+          ctx.ellipse(cx, cy, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2);
+          ctx.globalAlpha = 0.12;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.stroke();
+          break;
+        }
+        case "triangle": {
+          if (!p[2]) {
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+            break;
+          }
+          const c = p[2];
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.closePath();
+          ctx.globalAlpha = 0.12;
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.stroke();
+          break;
+        }
         case "channel": {
-          // Second line parallel to a→b, offset by the third point (or 5% of price).
+          // Second line parallel to a→b, offset by the third point (or 40px).
           const offset = p[2] ? p[2].y - (a.y + ((b.y - a.y) * (p[2].x - a.x)) / ((b.x - a.x) || 1)) : 40;
           ctx.moveTo(a.x, a.y);
           ctx.lineTo(b.x, b.y);
@@ -428,6 +587,131 @@ export function ChartDrawings({
           ctx.setLineDash([]);
           break;
         }
+        case "fibext": {
+          const base = p[2] ?? b;
+          const range = drawing.points[1] ? drawing.points[1]!.price - drawing.points[0]!.price : 0;
+          const basePrice = (drawing.points[2] ?? drawing.points[1] ?? drawing.points[0]!)!.price;
+          ctx.setLineDash([4, 4]);
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          if (p[2]) ctx.lineTo(p[2].x, p[2].y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          for (const level of FIB_EXTENSION_LEVELS) {
+            const price = basePrice + range * level;
+            const y = yAt(price);
+            if (y === null) continue;
+            ctx.globalAlpha = level === 0 || level === 1 ? 0.85 : 0.55;
+            ctx.beginPath();
+            ctx.moveTo(base.x, y);
+            ctx.lineTo(paneWidth, y);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillText(`${level.toFixed(3)} · ${price.toFixed(2)}`, base.x + 4, y - 3);
+          }
+          break;
+        }
+        case "fibchannel": {
+          if (!p[2]) {
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+            break;
+          }
+          const c = p[2];
+          const slope = (b.y - a.y) / ((b.x - a.x) || 1);
+          const offset = c.y - (a.y + slope * (c.x - a.x));
+          const left = Math.min(a.x, c.x);
+          const right = paneWidth;
+          for (const level of FIB_LEVELS) {
+            const y = a.y + slope * (left - a.x) + offset * level;
+            ctx.globalAlpha = level === 0 || level === 1 ? 0.85 : 0.5;
+            ctx.beginPath();
+            ctx.moveTo(left, y);
+            ctx.lineTo(right, y);
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+            ctx.fillText(level.toFixed(3), left + 4, y - 3);
+          }
+          ctx.globalAlpha = 0.07;
+          ctx.fillStyle = drawing.color;
+          ctx.beginPath();
+          ctx.moveTo(left, a.y + slope * (left - a.x));
+          ctx.lineTo(right, a.y + slope * (right - a.x));
+          ctx.lineTo(right, a.y + slope * (right - a.x) + offset);
+          ctx.lineTo(left, a.y + slope * (left - a.x) + offset);
+          ctx.closePath();
+          ctx.fill();
+          ctx.globalAlpha = 1;
+          ctx.fillStyle = drawing.color;
+          break;
+        }
+        case "pitchfork": {
+          if (!p[2]) {
+            ctx.moveTo(a.x, a.y);
+            ctx.lineTo(b.x, b.y);
+            ctx.stroke();
+            break;
+          }
+          const c = p[2];
+          const mid: Px = { x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 };
+          const dir: Px = { x: mid.x - a.x, y: mid.y - a.y };
+          const medianEnd = rayToEdge(a, dir, paneWidth, paneHeight);
+          const tineTop = rayToEdge(b, dir, paneWidth, paneHeight);
+          const tineBottom = rayToEdge(c, dir, paneWidth, paneHeight);
+          ctx.setLineDash([3, 3]);
+          ctx.globalAlpha = 0.5;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(c.x, c.y);
+          ctx.stroke();
+          ctx.setLineDash([]);
+          ctx.globalAlpha = 1;
+          ctx.beginPath();
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(medianEnd.x, medianEnd.y);
+          ctx.stroke();
+          ctx.globalAlpha = 0.65;
+          ctx.beginPath();
+          ctx.moveTo(b.x, b.y);
+          ctx.lineTo(tineTop.x, tineTop.y);
+          ctx.moveTo(c.x, c.y);
+          ctx.lineTo(tineBottom.x, tineBottom.y);
+          ctx.stroke();
+          ctx.globalAlpha = 1;
+          break;
+        }
+        case "arrow": {
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+          ctx.stroke();
+          arrowHead(ctx, a, b);
+          break;
+        }
+        case "polyline": {
+          if (p.length < 2) break;
+          ctx.moveTo(p[0]!.x, p[0]!.y);
+          for (let i = 1; i < p.length; i += 1) ctx.lineTo(p[i]!.x, p[i]!.y);
+          ctx.stroke();
+          break;
+        }
+        case "brush": {
+          if (p.length < 2) break;
+          ctx.lineJoin = "round";
+          ctx.lineCap = "round";
+          ctx.moveTo(p[0]!.x, p[0]!.y);
+          for (let i = 1; i < p.length; i += 1) {
+            const previous = p[i - 1]!;
+            const current = p[i]!;
+            const mid = { x: (previous.x + current.x) / 2, y: (previous.y + current.y) / 2 };
+            ctx.quadraticCurveTo(previous.x, previous.y, mid.x, mid.y);
+          }
+          ctx.stroke();
+          break;
+        }
         case "measure": {
           const from = drawing.points[0]!;
           const to = drawing.points[1] ?? from;
@@ -455,7 +739,8 @@ export function ChartDrawings({
         }
       }
       if (drawing.id === selected) {
-        for (const point of p) {
+        const handles = p.length <= 8 ? p : [p[0]!, p[p.length - 1]!];
+        for (const point of handles) {
           ctx.fillStyle = "#fff";
           ctx.strokeStyle = drawing.color;
           ctx.beginPath();
@@ -466,7 +751,7 @@ export function ChartDrawings({
       }
     }
     ctx.restore();
-  }, [chart, series, auto, drawings, draft, selected, toPx, toLogical, visible]);
+  }, [chart, series, auto, drawings, draft, hover, selected, toPx, toLogical, visible]);
 
   // Redraw on chart pan/zoom/resize and continuously while the pointer is over
   // the chart (price-scale drags do not emit an event).
@@ -551,6 +836,12 @@ export function ChartDrawings({
           case "vline":
             distance = Math.abs(x - a.x);
             break;
+          case "cross":
+            distance = Math.min(Math.abs(y - a.y), Math.abs(x - a.x));
+            break;
+          case "arrow":
+            distance = distanceToSegment(mouse, a, b);
+            break;
           case "rect":
           case "measure": {
             const inside =
@@ -559,6 +850,85 @@ export function ChartDrawings({
             distance = inside ? 0 : Infinity;
             break;
           }
+          case "ellipse": {
+            const cx = (a.x + b.x) / 2;
+            const cy = (a.y + b.y) / 2;
+            const rx = Math.max(1, Math.abs(b.x - a.x) / 2);
+            const ry = Math.max(1, Math.abs(b.y - a.y) / 2);
+            const norm = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2;
+            distance = Math.abs(norm - 1) < 0.25 ? 0 : Infinity;
+            break;
+          }
+          case "triangle": {
+            if (!p[2]) {
+              distance = distanceToSegment(mouse, a, b);
+              break;
+            }
+            distance = Math.min(
+              distanceToSegment(mouse, p[0]!, p[1]!),
+              distanceToSegment(mouse, p[1]!, p[2]!),
+              distanceToSegment(mouse, p[2]!, p[0]!),
+            );
+            break;
+          }
+          case "fibext": {
+            if (!p[2]) {
+              distance = distanceToSegment(mouse, a, b);
+              break;
+            }
+            const base = p[2];
+            if (x < base.x - 4) {
+              distance = distanceToSegment(mouse, a, b);
+              break;
+            }
+            const range = drawing.points[1] ? drawing.points[1]!.price - drawing.points[0]!.price : 0;
+            const basePrice = (drawing.points[2] ?? drawing.points[1] ?? drawing.points[0]!)!.price;
+            distance = Math.min(
+              ...FIB_EXTENSION_LEVELS.map((level) => {
+                const yy = series ? series.priceToCoordinate(basePrice + range * level) : null;
+                return yy === null ? Infinity : Math.abs(y - yy);
+              }),
+            );
+            break;
+          }
+          case "fibchannel": {
+            if (!p[2]) {
+              distance = distanceToSegment(mouse, a, b);
+              break;
+            }
+            const c = p[2];
+            const slope = (b.y - a.y) / ((b.x - a.x) || 1);
+            const offset = c.y - (a.y + slope * (c.x - a.x));
+            const left = Math.min(a.x, c.x);
+            const right = paneWidth;
+            if (x < left - 4 || x > right + 4) {
+              distance = Infinity;
+              break;
+            }
+            distance = Math.min(
+              ...FIB_LEVELS.map((level) => Math.abs(y - (a.y + slope * (x - a.x) + offset * level))),
+            );
+            break;
+          }
+          case "pitchfork": {
+            if (!p[2]) {
+              distance = distanceToSegment(mouse, a, b);
+              break;
+            }
+            const c = p[2];
+            const mid = { x: (b.x + c.x) / 2, y: (b.y + c.y) / 2 };
+            const dir = { x: mid.x - a.x, y: mid.y - a.y };
+            distance = Math.min(
+              distanceToSegment(mouse, a, rayToEdge(a, dir, paneWidth, paneHeight)),
+              distanceToSegment(mouse, b, rayToEdge(b, dir, paneWidth, paneHeight)),
+              distanceToSegment(mouse, c, rayToEdge(c, dir, paneWidth, paneHeight)),
+            );
+            break;
+          }
+          case "polyline":
+          case "brush":
+            distance = p.length > 1 ? polylineDistance(mouse, p) : Infinity;
+            break;
           case "text":
             distance = x >= a.x - 4 && x <= a.x + 8 * (drawing.text?.length ?? 1) && y <= a.y + 4 && y >= a.y - 16 ? 0 : Infinity;
             break;
@@ -567,7 +937,7 @@ export function ChartDrawings({
       }
       return null;
     },
-    [chart, drawings, toPx],
+    [chart, drawings, series, toPx],
   );
 
   // ----- pointer handling ---------------------------------------------------
@@ -585,6 +955,7 @@ export function ChartDrawings({
     const onDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
       const { x, y } = local(event);
+      downAt.current = { x, y };
       if (!inPricePane(y)) return;
       if (tool === "cursor") {
         if (!visible) return;
@@ -610,29 +981,74 @@ export function ChartDrawings({
         setTextEdit({ x, y, point });
         return;
       }
-      if (!TWO_POINT.has(tool)) {
+      const fixed = POINT_COUNT[tool];
+
+      if (tool === "brush") {
+        if (draftRef.current) return;
+        painting.current = true;
+        setDraft({ id: crypto.randomUUID(), tool, points: [point], color });
+        return;
+      }
+
+      if (tool === "polyline") {
+        const current = draftRef.current;
+        if (!current) {
+          setDraft({ id: crypto.randomUUID(), tool, points: [point], color });
+          return;
+        }
+        // The second click of a double-click lands on the last point; ignore it.
+        const last = toPx(current.points[current.points.length - 1]!);
+        if (last && Math.hypot(last.x - x, last.y - y) < 4) return;
+        setDraft({ ...current, points: [...current.points, point] });
+        return;
+      }
+
+      if (fixed === 1) {
         const drawing: Drawing = { id: crypto.randomUUID(), tool, points: [point], color };
         commit([...drawings, drawing]);
         setSelected(drawing.id);
         onToolChange("cursor");
         return;
       }
-      if (draft) {
-        const finished = { ...draft, points: [draft.points[0]!, point] };
+
+      const current = draftRef.current;
+      if (!current) {
+        setDraft({ id: crypto.randomUUID(), tool, points: [point], color });
+        setHover(point);
+        return;
+      }
+      const points = [...current.points, point];
+      if (fixed !== undefined && fixed > 0 && points.length >= fixed) {
+        const finished: Drawing = { ...current, points };
         commit([...drawings, finished]);
         setDraft(null);
+        setHover(null);
         setSelected(finished.id);
         onToolChange("cursor");
       } else {
-        setDraft({ id: crypto.randomUUID(), tool, points: [point, point], color });
+        setDraft({ ...current, points });
       }
     };
 
     const onMove = (event: PointerEvent) => {
       const { x, y } = local(event);
-      if (draft) {
+      if (painting.current) {
         const point = fromPx(x, y);
-        if (point) setDraft({ ...draft, points: [draft.points[0]!, point] });
+        if (!point) return;
+        setDraft((currentDraft) => {
+          if (!currentDraft) return currentDraft;
+          const last = currentDraft.points[currentDraft.points.length - 1];
+          const lastPx = last ? toPx(last) : null;
+          if (lastPx && Math.hypot(lastPx.x - x, lastPx.y - y) < 2) return currentDraft;
+          return { ...currentDraft, points: [...currentDraft.points, point] };
+        });
+        event.stopPropagation();
+        return;
+      }
+      if (draftRef.current) {
+        const point = fromPx(x, y);
+        if (point) setHover(point);
+        event.stopPropagation();
         return;
       }
       if (drag.current) {
@@ -667,18 +1083,36 @@ export function ChartDrawings({
     };
 
     const onUp = (event: PointerEvent) => {
-      if (draft) {
+      const press = downAt.current;
+      downAt.current = null;
+      if (painting.current) {
+        painting.current = false;
+        const current = draftRef.current;
+        if (current && current.points.length >= 2) {
+          commit([...drawings, current]);
+          setSelected(current.id);
+          onToolChange("cursor");
+        }
+        setDraft(null);
+        setHover(null);
+        return;
+      }
+      if (draftRef.current) {
+        const current = draftRef.current;
+        const fixed = POINT_COUNT[current.tool];
         // Press-drag-release also completes a two-point drawing.
-        const first = toPx(draft.points[0]!);
-        const { x, y } = local(event);
-        if (first && Math.hypot(first.x - x, first.y - y) > 8) {
-          const point = fromPx(x, y);
-          if (point) {
-            const finished = { ...draft, points: [draft.points[0]!, point] };
-            commit([...drawings, finished]);
-            setDraft(null);
-            setSelected(finished.id);
-            onToolChange("cursor");
+        if (fixed === 2 && current.points.length === 1) {
+          const { x, y } = local(event);
+          if (press && Math.hypot(press.x - x, press.y - y) > 8) {
+            const point = fromPx(x, y);
+            if (point) {
+              const finished: Drawing = { ...current, points: [current.points[0]!, point] };
+              commit([...drawings, finished]);
+              setDraft(null);
+              setHover(null);
+              setSelected(finished.id);
+              onToolChange("cursor");
+            }
           }
         }
         return;
@@ -692,15 +1126,29 @@ export function ChartDrawings({
       }
     };
 
+    const onDoubleClick = (event: MouseEvent) => {
+      const current = draftRef.current;
+      if (!current || current.tool !== "polyline" || current.points.length < 2) return;
+      event.stopPropagation();
+      event.preventDefault();
+      commit([...drawings, current]);
+      setDraft(null);
+      setHover(null);
+      setSelected(current.id);
+      onToolChange("cursor");
+    };
+
     element.addEventListener("pointerdown", onDown, true);
     element.addEventListener("pointermove", onMove, true);
+    element.addEventListener("dblclick", onDoubleClick, true);
     window.addEventListener("pointerup", onUp, true);
     return () => {
       element.removeEventListener("pointerdown", onDown, true);
       element.removeEventListener("pointermove", onMove, true);
+      element.removeEventListener("dblclick", onDoubleClick, true);
       window.removeEventListener("pointerup", onUp, true);
     };
-  }, [chart, tool, color, draft, drawings, hitTest, fromPx, toPx, toLogical, commit, dates, onToolChange, storageKey, visible]);
+  }, [chart, tool, color, drawings, hitTest, fromPx, toPx, toLogical, commit, dates, onToolChange, storageKey, visible]);
 
   const undo = useCallback(() => {
     const previous = history.current.pop();
@@ -725,14 +1173,29 @@ export function ChartDrawings({
     if (commandRef) commandRef.current = { undo, deleteSelected, clear };
   }, [commandRef, undo, deleteSelected, clear]);
 
+  const finishPolyline = useCallback(() => {
+    const current = draftRef.current;
+    if (!current || current.tool !== "polyline" || current.points.length < 2) return;
+    commit([...drawings, current]);
+    setDraft(null);
+    setHover(null);
+    setSelected(current.id);
+    onToolChange("cursor");
+  }, [commit, drawings, onToolChange]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null;
       if (target && (target.tagName === "INPUT" || target.tagName === "TEXTAREA")) return;
       if (event.key === "Escape") {
         setDraft(null);
+        setHover(null);
+        painting.current = false;
         setSelected(null);
         if (tool !== "cursor") onToolChange("cursor");
+      } else if (event.key === "Enter" && draft?.tool === "polyline") {
+        event.preventDefault();
+        finishPolyline();
       } else if ((event.key === "Delete" || event.key === "Backspace") && selected) {
         event.preventDefault();
         deleteSelected();
@@ -743,7 +1206,7 @@ export function ChartDrawings({
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [selected, tool, onToolChange, deleteSelected, undo]);
+  }, [selected, tool, onToolChange, deleteSelected, undo, draft, finishPolyline]);
 
   return (
     <>

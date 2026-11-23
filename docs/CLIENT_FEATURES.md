@@ -13,7 +13,7 @@ Legend: ✅ done · 🟡 partial (works, with a stated data limit) · ⛔ blocke
 | Feature | Status | Where | Notes |
 |---|---|---|---|
 | NEPSE chart (zoom fixed) | ✅ | Market → NEPSE Index | Wheel/pinch/drag zoom now persists; "Reset zoom" and axis double-click reset it. Cause was the chart being rebuilt on every mouse move. |
-| Drawing tools like TradingView | ✅ | Company and index charts | Trend line, ray, extended line, horizontal line/ray, vertical line, rectangle/zone, parallel channel, Fib retracement, measure, text; colours, magnet snap, undo (Ctrl Z), delete, hide, clear. Saved per symbol. |
+| Drawing tools like TradingView | ✅ | Company and index charts | Trend line, ray, extended line, horizontal line/ray, vertical line, cross line, rectangle/zone, ellipse, triangle, parallel channel, Fib retracement, Fib extension, Fib channel, pitchfork, arrow, polyline, freehand brush, measure, text; colours, magnet snap, undo (Ctrl Z), delete, hide, clear. Saved per symbol. |
 | SMA / EMA | ✅ | Chart → Indicators | SMA 20/50/200, EMA 9/20/21. |
 | Ichimoku | ✅ | Chart → Indicators | Conversion, base, spans (plotted 26 ahead within stored range), lagging span. |
 | OBV, Bollinger bands | ✅ | Chart → Indicators | OBV in its own pane. |
@@ -25,7 +25,8 @@ Legend: ✅ done · 🟡 partial (works, with a stated data limit) · ⛔ blocke
 
 | Feature | Status | Where | Notes |
 |---|---|---|---|
-| Candlestick signal (name) | ✅ | Market, Company (markers + history), Screener | 20 named patterns with prior-trend context. |
+| Candlestick signal (name) | ✅ | Market, Company (markers + history), Screener | 26 named patterns with prior-trend context. The Company → Candlestick patterns tab groups every pattern by one, two or three candles, shows a diagram and description for each, and marks the ones seen in the last 120 sessions. |
+| Multi-candle pattern zones | ✅ | Company chart → Pattern zones | Shades the two or three candles that together form each detected engulfing, harami, tweezer, star or three-candle pattern (most recent 12). The chart legend also reports the span beside each marker. |
 | Support zone / resistance zone | ✅ | Chart → Auto analysis → S/R zones | Clustered swing highs/lows within 1.5%, with touch counts. |
 | Trend line area (support, resistance) | ✅ | Chart → Auto analysis → Auto trendlines | Rising support / falling resistance from the last two swing pivots; broken lines dashed. Manual trend lines via drawing tools. |
 | Swing high / swing low | ✅ | Chart → Auto analysis | 5/5 fractal pivots. |

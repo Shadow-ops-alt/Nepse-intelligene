@@ -640,8 +640,39 @@ const PATTERNS = {
     bias: "bearish",
     span: 2,
   },
+  tweezerBottom: {
+    id: "tweezer-bottom",
+    name: "Tweezer bottom",
+    bias: "bullish",
+    span: 2,
+  },
+  tweezerTop: { id: "tweezer-top", name: "Tweezer top", bias: "bearish", span: 2 },
   morningStar: { id: "morning-star", name: "Morning star", bias: "bullish", span: 3 },
   eveningStar: { id: "evening-star", name: "Evening star", bias: "bearish", span: 3 },
+  threeInsideUp: {
+    id: "three-inside-up",
+    name: "Three inside up",
+    bias: "bullish",
+    span: 3,
+  },
+  threeInsideDown: {
+    id: "three-inside-down",
+    name: "Three inside down",
+    bias: "bearish",
+    span: 3,
+  },
+  threeOutsideUp: {
+    id: "three-outside-up",
+    name: "Three outside up",
+    bias: "bullish",
+    span: 3,
+  },
+  threeOutsideDown: {
+    id: "three-outside-down",
+    name: "Three outside down",
+    bias: "bearish",
+    span: 3,
+  },
   threeWhiteSoldiers: {
     id: "three-white-soldiers",
     name: "Three white soldiers",
@@ -770,6 +801,15 @@ export function detectPatternsAt(candles: PriceBar[], index: number): CandlePatt
     ) {
       found.push(PATTERNS.darkCloudCover);
     }
+
+    // Tweezers: two sessions that reject the same price level.
+    const sameLow = Math.abs(p.low - c.low) <= Math.max(0.01, Math.min(p.low, c.low) * 0.001);
+    const sameHigh = Math.abs(p.high - c.high) <= Math.max(0.01, Math.min(p.high, c.high) * 0.001);
+    if (trend === "down" && p.bearish && c.bullish && sameLow) {
+      found.push(PATTERNS.tweezerBottom);
+    } else if (trend === "up" && p.bullish && c.bearish && sameHigh) {
+      found.push(PATTERNS.tweezerTop);
+    }
   }
 
   // --- three-candle patterns -----------------------------------------------
@@ -815,6 +855,53 @@ export function detectPatternsAt(candles: PriceBar[], index: number): CandlePatt
       c.open >= b.close
     ) {
       found.push(PATTERNS.threeBlackCrows);
+    }
+
+    // Three inside / three outside: a harami or engulfing pair confirmed by a
+    // third candle that continues the new direction.
+    const firstBodyTop = Math.max(a.open, a.close);
+    const firstBodyBottom = Math.min(a.open, a.close);
+    const secondBodyTop = Math.max(b.open, b.close);
+    const secondBodyBottom = Math.min(b.open, b.close);
+    const secondInsideFirst =
+      secondBodyTop < firstBodyTop && secondBodyBottom > firstBodyBottom;
+    const secondEngulfsFirstBullish =
+      a.bearish && b.bullish && b.open <= a.close && b.close >= a.open && b.body > a.body;
+    const secondEngulfsFirstBearish =
+      a.bullish && b.bearish && b.open >= a.close && b.close <= a.open && b.body > a.body;
+
+    if (
+      aLong &&
+      a.bearish &&
+      b.bullish &&
+      secondInsideFirst &&
+      b.body <= 0.5 * a.body &&
+      c.bullish &&
+      c.close > firstBodyTop
+    ) {
+      found.push(PATTERNS.threeInsideUp);
+    } else if (
+      aLong &&
+      a.bullish &&
+      b.bearish &&
+      secondInsideFirst &&
+      b.body <= 0.5 * a.body &&
+      c.bearish &&
+      c.close < firstBodyBottom
+    ) {
+      found.push(PATTERNS.threeInsideDown);
+    } else if (
+      secondEngulfsFirstBullish &&
+      c.bullish &&
+      c.close > secondBodyTop
+    ) {
+      found.push(PATTERNS.threeOutsideUp);
+    } else if (
+      secondEngulfsFirstBearish &&
+      c.bearish &&
+      c.close < secondBodyBottom
+    ) {
+      found.push(PATTERNS.threeOutsideDown);
     }
   }
 
