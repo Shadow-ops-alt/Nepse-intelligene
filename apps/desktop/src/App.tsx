@@ -235,10 +235,16 @@ export function App() {
     }
   }, [refreshState.reload]);
 
-  const lastSuccessRef = useRef<string | null>(null);
+  const lastSuccessRef = useRef<string | null | undefined>(undefined);
   useEffect(() => {
     const next = refresh?.lastSuccessAt ?? null;
-    if (next && lastSuccessRef.current && next !== lastSuccessRef.current) {
+    // The first value is the baseline. A later success, including the first
+    // success after mounting with none, means new data was imported.
+    if (lastSuccessRef.current === undefined) {
+      lastSuccessRef.current = next;
+      return;
+    }
+    if (next && next !== lastSuccessRef.current) {
       // A background import finished: refresh the session pill and company list.
       metaState.reload();
       companiesState.reload();

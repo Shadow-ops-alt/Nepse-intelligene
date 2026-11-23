@@ -51,7 +51,7 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
   const companies = useApi<CompaniesResponse>("/api/companies");
   // End-of-day quotes are the fallback when the market is closed and the live
   // feed is empty, so the page still shows the last session.
-  const quotes = useApi<QuotesResponse>("/api/quotes");
+  const quotes = useApi<QuotesResponse>(`/api/quotes?t=${tick}`);
   const [search, setSearch] = useState("");
   const [depthSymbol, setDepthSymbol] = useState<string | null>(null);
   const depth = useApi<LiveDepth>(

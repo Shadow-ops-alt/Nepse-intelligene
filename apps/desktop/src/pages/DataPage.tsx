@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import {
   describeAge,
@@ -97,6 +97,28 @@ export function DataPage({
   useEffect(() => {
     if (refresh?.lastSuccessAt) setRefreshError(null);
   }, [refresh?.lastSuccessAt]);
+
+  // Reload the coverage and import tables when a background import finishes,
+  // so this page does not keep showing the previous session until a reload.
+  const lastSuccessRef = useRef<string | null | undefined>(undefined);
+  useEffect(() => {
+    const next = refresh?.lastSuccessAt ?? null;
+    if (lastSuccessRef.current === undefined) {
+      lastSuccessRef.current = next;
+      return;
+    }
+    if (next && next !== lastSuccessRef.current) {
+      coverageState.reload();
+      importState.reload();
+      historyState.reload();
+    }
+    lastSuccessRef.current = next;
+  }, [
+    refresh?.lastSuccessAt,
+    coverageState.reload,
+    importState.reload,
+    historyState.reload,
+  ]);
 
   const importStatus = importState.data;
   const history = historyState.data?.entries ?? [];
