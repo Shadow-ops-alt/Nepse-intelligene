@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatCompact, formatNumber } from "../api";
 import { useApi } from "../hooks";
-import type { CompaniesResponse } from "../types";
+import type { CompaniesResponse, QuotesResponse } from "../types";
 import type {
   LiveDepth,
   LiveMarket,
@@ -49,6 +49,9 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
   const market = useApi<LiveMarket>(`/api/live/market?t=${tick}`);
   const summary = useApi<LiveSummary>(`/api/live/summary?t=${tick}`);
   const companies = useApi<CompaniesResponse>("/api/companies");
+  // End-of-day quotes are the fallback when the market is closed and the live
+  // feed is empty, so the page still shows the last session.
+  const quotes = useApi<QuotesResponse>("/api/quotes");
   const [search, setSearch] = useState("");
   const [depthSymbol, setDepthSymbol] = useState<string | null>(null);
   const depth = useApi<LiveDepth>(
@@ -66,15 +69,44 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
     [companies.data],
   );
 
+  const closed = status.data?.marketOpen === false;
+  const liveRows = market.data?.rows ?? [];
+  const eodRows = useMemo<LiveQuote[]>(
+    () =>
+      (quotes.data?.quotes ?? []).map((quote) => ({
+        symbol: quote.symbol,
+        ltp: quote.ltp,
+        previousClose: quote.previousClose,
+        change: quote.change,
+        changePercent: quote.changePercent,
+        open: quote.open,
+        high: quote.high,
+        low: quote.low,
+        volume: quote.volume,
+        turnover: quote.turnover,
+        lastTradedAt: quote.asOf,
+      })),
+    [quotes.data],
+  );
+  const usingEod = closed && liveRows.length === 0 && eodRows.length > 0;
+  const displayRows = liveRows.length > 0 ? liveRows : closed ? eodRows : liveRows;
+  const sessionDate = useMemo(() => {
+    const dates = eodRows
+      .map((row) => row.lastTradedAt?.slice(0, 10) ?? "")
+      .filter(Boolean)
+      .sort();
+    return dates.at(-1) ?? market.data?.asOf?.slice(0, 10) ?? null;
+  }, [eodRows, market.data?.asOf]);
+
   const rows = useMemo(() => {
     const needle = search.trim().toUpperCase();
-    return (market.data?.rows ?? []).filter(
+    return displayRows.filter(
       (row) =>
         !needle ||
         row.symbol.includes(needle) ||
         (nameOf.get(row.symbol)?.toUpperCase().includes(needle) ?? false),
     );
-  }, [market.data, search, nameOf]);
+  }, [displayRows, search, nameOf]);
 
   const { sorted, sort, toggle } = useSort<LiveQuote, SortKey>(
     rows,
@@ -102,8 +134,8 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
   }
 
   const error = market.data?.lastError ?? status.data.lastError;
-  const gainers = (market.data?.rows ?? []).filter((r) => (r.changePercent ?? 0) > 0).length;
-  const losers = (market.data?.rows ?? []).filter((r) => (r.changePercent ?? 0) < 0).length;
+  const gainers = displayRows.filter((r) => (r.changePercent ?? 0) > 0).length;
+  const losers = displayRows.filter((r) => (r.changePercent ?? 0) < 0).length;
 
   return (
     <div className="stack">
@@ -120,12 +152,28 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
         </Notice>
       )}
 
+      {closed && (
+        <Notice tone="warn">
+          <strong>Market closed.</strong> NEPSE trades Sunday to Thursday,
+          11:00 to 15:00 NPT.{" "}
+          {liveRows.length > 0
+            ? `Showing the last live snapshot from ${nptTime(market.data?.asOf ?? null)}.`
+            : usingEod
+              ? `Showing the last stored session${sessionDate ? ` (${sessionDate})` : ""}. Prices are end-of-day closes, not live trades.`
+              : "No stored session data is available yet. Automatic updates will fetch it."}
+        </Notice>
+      )}
+
       <div className="stats-row">
         <Stat
           label="Market"
           value={open ? "Open" : status.data.marketOpen === false ? "Closed" : "Unknown"}
           badge={<Badge tone={open ? "good" : "neutral"}>{open ? "LIVE" : "idle"}</Badge>}
-          hint={`updated ${nptTime(market.data?.asOf ?? status.data.asOf)}`}
+          hint={
+            usingEod
+              ? `last stored session${sessionDate ? ` (${sessionDate})` : ""}`
+              : `updated ${nptTime(market.data?.asOf ?? status.data.asOf)}`
+          }
         />
         <Stat
           label="NEPSE (live)"
@@ -150,14 +198,18 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
               <span className="tone-down">{losers}</span>
             </span>
           }
-          hint={`${market.data?.rows.length ?? 0} scrips in the live feed`}
+          hint={`${displayRows.length} scrips ${usingEod ? "in the last stored session" : "in the live feed"}`}
         />
       </div>
 
       <div className="grid main-side">
         <Card
           title="Live market"
-          subtitle={`Source: ${status.data.source} · refresh every ${open ? "15 s" : "5 min (market closed)"}`}
+          subtitle={
+            usingEod
+              ? `Market closed · last stored session${sessionDate ? ` (${sessionDate})` : ""}`
+              : `Source: ${status.data.source} · refresh every ${open ? "15 s" : "5 min (market closed)"}`
+          }
           action={
             <div className="card-actions">
               <input
@@ -177,7 +229,7 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
             <EmptyState title={open ? "No live rows yet" : "No live trading right now"}>
               {open
                 ? "The live feed returned no rows."
-                : "NEPSE trades Sunday–Thursday, 11:00–15:00 NPT. Outside those hours the feed is empty; end-of-day prices are on the Market page."}
+                : "NEPSE trades Sunday to Thursday, 11:00 to 15:00 NPT. Outside those hours the live feed is empty. If end-of-day data is stored, it appears here as the last session; otherwise it is on the Market page."}
             </EmptyState>
           ) : (
             <div className="table-scroll tall">
