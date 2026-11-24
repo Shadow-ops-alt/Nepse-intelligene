@@ -49,10 +49,14 @@ stays in local mode. A build with the file bundled is the hosted APK.
 
 ## Client account
 
-1. In the Supabase dashboard open **Authentication → Users**.
-2. Create the client user with their email and a temporary password, email
+1. In the Supabase dashboard open **Authentication → Sign In / Providers → Email**
+   and turn **Allow new users to sign up** off. The project was created with
+   public signup enabled; RLS still isolates data, but invite-only requires
+   this toggle.
+2. Open **Authentication → Users**.
+3. Create the client user with their email and a temporary password, email
    confirmed. Do not enable public signup.
-3. Send the email and password separately. Tell the client to change the
+4. Send the email and password separately. Tell the client to change the
    password after the first sign-in if you enabled password changes.
 
 Test accounts created during verification:
