@@ -313,7 +313,7 @@ export function AlertsPage({
         close the window. They stop only when you choose <strong>Quit</strong>{" "}
         from the tray menu; use <strong>Open NEPSE Terminal</strong> to bring
         the window back. On mobile and in the installed PWA, alerts run only
-        while the page is open. Live prices are unofficial.
+        while the page is open. Live prices are indicative.
       </Notice>
 
       <Card>
@@ -501,7 +501,7 @@ export function AlertsPage({
                               </td>
                               <td className="muted small">{alert.detail}</td>
                               <td className="muted small nowrap">
-                                {alert.source === "price-live" ? "live LTP (unofficial)" : alert.source === "price-eod" ? "EOD close" : "EOD signal"}
+                                {alert.source === "price-live" ? "live LTP" : alert.source === "price-eod" ? "EOD close" : "EOD signal"}
                               </td>
                             </ClickableRow>
                           );
@@ -632,8 +632,8 @@ export function AlertsPage({
       </Card>
 
       <p className="muted small">
-        Signals are computed locally from unofficial end-of-day candles and are
-        research aids, not trading advice. Price alerts use the unofficial live
+        Signals are computed locally from end-of-day candles and are
+        research aids, not trading advice. Price alerts use the live
         LTP when the live service responds, otherwise the last end-of-day close.
       </p>
     </div>

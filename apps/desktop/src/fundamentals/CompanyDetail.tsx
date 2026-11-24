@@ -126,8 +126,7 @@ export const CompanyDetail = memo(function CompanyDetail(props: CompanyDetailPro
   return (
     <Card
       title="Company detail"
-      subtitle="Public profile, fundamentals, dividends, disclosures and the latest stored floorsheet — all unofficial"
-      action={<Badge tone="warn">unofficial</Badge>}
+      subtitle="Public profile, fundamentals, dividends, disclosures and the latest stored floorsheet"
     >
       <Tabs<DetailTab>
         label="Company detail"
@@ -524,7 +523,7 @@ function FundamentalsPanel({
         <div className="stack-sm">
           <ProvenanceLine provenance={provenance} sources={merged.sources} asOf={merged.reportedAt} derived />
           <span className="small">
-            UNVERIFIED values as displayed by Merolagani (key ratios) and ShareSansar
+            Values as displayed by Merolagani (key ratios) and ShareSansar
             (latest quarterly statement, unaudited). <strong>d</strong> = DERIVED locally.
             Merolagani’s EPS is shown for the fiscal year / quarter it labels (a Q1–Q3
             figure may be part-year) and its P/E uses that figure; the statement EPS is
@@ -759,7 +758,7 @@ function DividendsPanel({
             sources={events.some((event) => event.type === "dividend") ? ["merolagani", "sharesansar (dividend events)"] : ["merolagani"]}
           />
           <span className="small">
-            Percentages of paid-up value as listed (UNVERIFIED): Merolagani’s dividend history,
+            Percentages of paid-up value as listed: Merolagani’s dividend history,
             with ShareSansar’s dividend announcements filling years or bonus figures Merolagani
             does not list (a disagreement is flagged ⚠ and the Merolagani value kept).
             {allYears.length > summary.years.length && ` ${allYears.length} fiscal years are listed in all; the five most recent are shown.`}{" "}
@@ -1070,7 +1069,7 @@ function FloorsheetPanel({ symbol }: { symbol: string }) {
         <span className="small">
           End-of-day record of {state.data.date} ({state.data.totalTrades.toLocaleString()} trades market-wide,
           filtered to {symbol} locally; {state.data.availableDates.length} stored day
-          {state.data.availableDates.length === 1 ? "" : "s"}). UNVERIFIED broker numbers as displayed; VWAP,
+          {state.data.availableDates.length === 1 ? "" : "s"}). Broker numbers as displayed; VWAP,
           broker totals and net positions are DERIVED. Bulk = a single trade ≥ Rs 1 crore.
         </span>
       </div>

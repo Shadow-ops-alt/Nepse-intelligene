@@ -255,7 +255,9 @@ async function main() {
   check("local server uses an ephemeral port", !shellInfo.href.includes(":4310/"),
     shellInfo.href);
   check("PC API is not referenced", !shellInfo.href.includes("4310"));
-  check("Live market nav is hidden", !shellInfo.nav.includes("Live market"),
+  // The Android local server serves /api/live/* from ShareSansar, so the
+  // Live market page is intentionally available in the standalone app.
+  check("Live market nav is available", shellInfo.nav.includes("Live market"),
     shellInfo.nav.join(", "));
   check("Backtest nav is hidden", !shellInfo.nav.includes("Backtest"),
     shellInfo.nav.join(", "));
@@ -271,14 +273,23 @@ async function main() {
     !marketText.includes("Could not load") &&
     marketText.length > 500,
     `${marketText.length} chars`);
+  check("Market shows the 2026-11-24 session",
+    marketText.includes("2026-11-24"), "session date missing");
+  check("Market shows no unverified/unofficial labels",
+    !/unverified|unofficial/i.test(marketText), "label text found");
   await app.screenshot("01-market-standalone.png");
 
-  // Live route must bounce to Market.
+  // The Live market route resolves on the phone; it is no longer redirected.
   await app.evaluate("location.hash = '#/live'");
-  await sleep(1200);
+  await sleep(1500);
   const hashAfterLive = await app.evaluate("location.hash");
-  check("Live market route redirects to Market", hashAfterLive === "#/market",
-    hashAfterLive);
+  check("Live market route opens", hashAfterLive === "#/live", hashAfterLive);
+  const liveText = await app.bodyText();
+  check("Live market page renders",
+    liveText.includes("Live market") && liveText.length > 300,
+    `${liveText.length} chars`);
+  check("Live market shows no unverified/unofficial labels",
+    !/unverified|unofficial/i.test(liveText), "label text found");
   await app.evaluate("location.hash = '#/backtest'");
   await sleep(1200);
   const hashAfterBacktest = await app.evaluate("location.hash");
@@ -409,6 +420,8 @@ async function main() {
     qualityText.includes("Data quality") &&
     !qualityText.includes("Could not load"),
     `${qualityText.length} chars`);
+  check("Data quality shows no unverified/unofficial labels",
+    !/unverified|unofficial/i.test(qualityText), "label text found");
   await app.screenshot("06-data-quality.png");
 
   // ------------------------------------------------------------- data page --
@@ -418,6 +431,8 @@ async function main() {
   const dataText = await app.bodyText();
   check("Data page shows the data pack notice",
     dataText.includes("Data pack") && dataText.includes("Latest session"));
+  check("Data page shows no unverified/unofficial labels",
+    !/unverified|unofficial/i.test(dataText), "label text found");
   const visibleUpdateCards = await app.evaluate(`JSON.stringify(
     [...document.querySelectorAll('section.card')]
       .filter(card => card.offsetParent !== null)

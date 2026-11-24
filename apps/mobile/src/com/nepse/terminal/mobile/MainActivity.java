@@ -9,6 +9,8 @@ import android.content.SharedPreferences;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.text.InputType;
 import android.util.Log;
 import android.view.Menu;
@@ -46,6 +48,16 @@ public class MainActivity extends Activity {
     private static final String DEFAULT_UPDATE_URL =
             "https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/"
                     + "NEPSE-Terminal-" + APP_VERSION + "-mobile-pack.zip";
+    /**
+     * Small JSON manifest published beside the pack zip. It carries the pack
+     * version and the zip URL, so an automatic check costs one small request
+     * instead of downloading the whole pack on every launch.
+     */
+    private static final String DEFAULT_PACK_MANIFEST_URL =
+            "https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/"
+                    + "NEPSE-Terminal-" + APP_VERSION + "-mobile-pack.json";
+    private static final long PACK_UPDATE_INITIAL_DELAY_MS = 4_000L;
+    private static final long PACK_UPDATE_INTERVAL_MS = 6L * 60L * 60L * 1000L;
     private static final String RETRY_SCHEME = "nepse-retry";
 
     private static final int MENU_RELOAD = 1;
@@ -59,6 +71,15 @@ public class MainActivity extends Activity {
     private LocalStore localStore;
     private LocalServer server;
     private AlertDialog progressDialog;
+    private boolean packUpdateRunning = false;
+    private final Handler packUpdateHandler = new Handler(Looper.getMainLooper());
+    private final Runnable packUpdateTick = new Runnable() {
+        @Override
+        public void run() {
+            autoCheckForPackUpdate();
+            packUpdateHandler.postDelayed(this, PACK_UPDATE_INTERVAL_MS);
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -104,6 +125,8 @@ public class MainActivity extends Activity {
                 }
             }
         }, "nepse-server-start").start();
+
+        packUpdateHandler.postDelayed(packUpdateTick, PACK_UPDATE_INITIAL_DELAY_MS);
     }
 
     private void configureWebView() {
@@ -321,13 +344,108 @@ public class MainActivity extends Activity {
     }
 
     /**
+     * Resolves the pack manifest for automatic and manual checks. Priority:
+     * an explicit intent extra (used by the emulator test), the optional
+     * hosted-config value, then the published release manifest.
+     */
+    private String packManifestUrl() {
+        Intent intent = getIntent();
+        String override = intent == null ? null : intent.getStringExtra("packManifestUrl");
+        if (override != null && !override.trim().isEmpty()) {
+            return override.trim();
+        }
+        String hosted = HostedConfig.packManifestUrl(this);
+        if (hosted != null && !hosted.isEmpty()) {
+            return hosted;
+        }
+        return DEFAULT_PACK_MANIFEST_URL;
+    }
+
+    /**
+     * Automatic data update: one small manifest request shortly after launch
+     * and every six hours while the app stays open. A newer pack is downloaded,
+     * hash-verified, installed and the web view reloaded with no dialog. Any
+     * failure is logged and ignored, so the bundled pack keeps working and the
+     * client never has to do anything.
+     */
+    private void autoCheckForPackUpdate() {
+        if (packUpdateRunning) return;
+        final String manifestUrl = packManifestUrl();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final PackUpdater.UpdateInfo info =
+                            PackUpdater.resolveManifest(manifestUrl);
+                    String installed = "";
+                    JSONObject manifest = packStore == null ? null : packStore.manifest();
+                    if (manifest != null) installed = manifest.optString("version", "");
+                    if (info.version.isEmpty() || info.version.equals(installed)) return;
+                    Log.i(TAG, "data pack update available: " + installed + " -> " + info.version);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            installPackAutomatically(info.url);
+                        }
+                    });
+                } catch (Exception error) {
+                    Log.i(TAG, "automatic pack check skipped: " + error.getMessage());
+                }
+            }
+        }, "nepse-pack-autocheck").start();
+    }
+
+    private void installPackAutomatically(final String url) {
+        if (packUpdateRunning) return;
+        packUpdateRunning = true;
+        Toast.makeText(this, "Updating market data…", Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    File installed = PackUpdater.downloadAndInstall(
+                            MainActivity.this, url, new PackUpdater.Progress() {
+                                @Override
+                                public void update(String message) {
+                                    Log.i(TAG, "pack update: " + message);
+                                }
+                            });
+                    packStore.setDownloadedDir(installed);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            packUpdateRunning = false;
+                            if (webView != null) webView.reload();
+                            Toast.makeText(MainActivity.this, "Market data updated",
+                                    Toast.LENGTH_LONG).show();
+                        }
+                    });
+                } catch (final Exception error) {
+                    Log.e(TAG, "automatic pack update failed", error);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            packUpdateRunning = false;
+                        }
+                    });
+                }
+            }
+        }, "nepse-pack-autoinstall").start();
+    }
+
+    /**
      * Reads the optional packManifestUrl from hosted-config.json. When it is
      * set, the app resolves the latest pack zip from that manifest and reuses
      * the existing download, hash-verify and install path. Without it the
      * manual URL dialog is shown, exactly as before.
      */
     private void checkForUpdates() {
-        final String manifestUrl = HostedConfig.packManifestUrl(this);
+        if (packUpdateRunning) {
+            Toast.makeText(this, "A data update is already running",
+                    Toast.LENGTH_SHORT).show();
+            return;
+        }
+        final String manifestUrl = packManifestUrl();
         if (manifestUrl == null) {
             showUpdateDialog();
             return;
@@ -421,6 +539,7 @@ public class MainActivity extends Activity {
     }
 
     private void startPackUpdate(String url) {
+        packUpdateRunning = true;
         final AlertDialog progress = new AlertDialog.Builder(this)
                 .setTitle("Data pack update")
                 .setMessage("Starting")
@@ -450,6 +569,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            packUpdateRunning = false;
                             dismissProgress();
                             webView.reload();
                             Toast.makeText(MainActivity.this, "Data pack updated",
@@ -461,6 +581,7 @@ public class MainActivity extends Activity {
                     runOnUiThread(new Runnable() {
                         @Override
                         public void run() {
+                            packUpdateRunning = false;
                             dismissProgress();
                             new AlertDialog.Builder(MainActivity.this)
                                     .setTitle("Update failed")

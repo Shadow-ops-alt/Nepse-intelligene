@@ -2409,7 +2409,7 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             disclaimer: feed?.disclaimer ?? LIVE_DISCLAIMER,
             classification: "UNVERIFIED",
             note:
-              "Latest-session price points from NEPSE's unofficial graph endpoint, resampled into bars. The source publishes no volume, so volume is zero and bars exist only where the price changed.",
+              "Latest-session price points from NEPSE's public graph endpoint, resampled into bars. The source publishes no volume, so volume is zero and bars exist only where the price changed.",
           });
           return;
         }

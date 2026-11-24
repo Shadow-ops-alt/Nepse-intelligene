@@ -317,9 +317,6 @@ export function MarketPage({
         <Stat
           label="Turnover"
           value={reportedTurnover !== null ? `Rs ${formatCompact(reportedTurnover)}` : "—"}
-          badge={
-            reportedTurnover !== null ? <Badge tone="warn">unverified</Badge> : undefined
-          }
           hint={
             reportedTurnover !== null ? (
               <>
@@ -436,9 +433,8 @@ export function MarketPage({
               </>
             ) : (
               <div className="row" style={{ gap: 14 }}>
-                <Badge tone="warn">UNVERIFIED</Badge>
                 <span>
-                  Sampled from the unofficial live feed while the app is open.
+                  Sampled from the live feed while the app is open.
                   Intraday history before the chart opened is not available;
                   end-of-day history is under 1D.
                 </span>
@@ -800,7 +796,6 @@ export function MarketPage({
             ? `Largest contracts on ${floorsheetState.data.date}`
             : "Most recent public floorsheet"
         }
-        action={<Badge tone="warn">unofficial</Badge>}
         footer="Only the latest trading day is published on the free public page. Broker flows are aggregated from these stored trades, never fetched separately."
       >
         {floorsheetState.loading ? (
@@ -849,8 +844,7 @@ export function MarketPage({
         <Card
           title="IPO & issue pipeline"
           subtitle="Upcoming and recent public issues"
-          action={<Badge tone="warn">unofficial</Badge>}
-          footer="ShareSansar's upcoming-issue list. Dates and units are shown as published; missing fields stay blank."
+            footer="ShareSansar's upcoming-issue list. Dates and units are shown as published; missing fields stay blank."
         >
           {iposState.loading ? (
             <Spinner label="Loading issue pipeline" />
@@ -894,8 +888,7 @@ export function MarketPage({
         <Card
           title="Market news"
           subtitle="Latest headlines from the public sources"
-          action={<Badge tone="warn">unofficial</Badge>}
-        >
+          >
           {newsState.loading ? (
             <Spinner label="Loading news" />
           ) : newsItems.length === 0 ? (

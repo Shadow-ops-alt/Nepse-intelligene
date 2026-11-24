@@ -28,12 +28,12 @@ import { createShareSansarReader } from "./sharesansar";
 
 /** The label the UI shows next to every live value. */
 export const LIVE_LABEL =
-  "LIVE · unofficial (nepalstock.com, ShareSansar fallback)";
-export const LIVE_SOURCE = "nepalstock.com and ShareSansar live pages (unofficial)";
+  "LIVE (nepalstock.com, ShareSansar fallback)";
+export const LIVE_SOURCE = "nepalstock.com and ShareSansar live pages";
 export const LIVE_DISCLAIMER =
-  "UNVERIFIED unofficial live data read from nepalstock.com's internal web endpoints " +
-  "and, as a fallback, ShareSansar's public live-trading page. Not provided, endorsed " +
-  "or verified by NEPSE; it may be delayed, incomplete, wrong or unavailable " +
+  "Live data read from nepalstock.com's internal web endpoints " +
+  "and, as a fallback, ShareSansar's public live-trading page. Not provided or " +
+  "endorsed by NEPSE; it may be delayed, incomplete, wrong or unavailable " +
   "(nepalstock.com blocks some networks/regions). It is never written to the " +
   "end-of-day store.";
 

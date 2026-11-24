@@ -462,8 +462,8 @@ export function SectorsPage({
                 1-day change of members that closed in the latest stored session
                 — not an official index. The sub-index line is the exchange
                 sub-index (matched by name; “no sub-index” when none matches) and
-                “published” is the source’s own sector-performance row, both
-                unverified. 1-week volume and turnover are sums of members’ last
+                “published” is the source’s own sector-performance row. 1-week
+                volume and turnover are sums of members’ last
                 5 sessions from the screener.{" "}
                 {published === null &&
                   "No source-published sector performance is stored, so that line is omitted."}
@@ -553,7 +553,7 @@ export function SectorsPage({
 
       {screenerState.data && (
         <p className="muted small">
-          Prices: end-of-day, unofficial (
+          Prices: end-of-day (
           {quotesState.data && (
             <DataStateBadge
               state={quotesState.data.dataState.state}
@@ -754,7 +754,7 @@ function SubIndexChart({ index, sector }: { index: IndexQuote | null; sector: st
           <DataStateBadge state={provenance.state} classification={provenance.classification} />
         ) : undefined
       }
-      footer="Exchange sub-index level from stored end-of-day history (unofficial source). Sub-indices are capitalisation-weighted, so they can move differently from the equal-weighted tile."
+      footer="Exchange sub-index level from stored end-of-day history (public source). Sub-indices are capitalisation-weighted, so they can move differently from the equal-weighted tile."
     >
       {!index ? (
         <EmptyState title="No sub-index">
@@ -959,7 +959,7 @@ function MembersTable({
         turnover1W: row.turnover5d,
         volume3dRatio: row.volume3dRatio,
         lastSession: row.lastSession,
-        classification: "DERIVED from UNVERIFIED end-of-day data",
+        classification: "DERIVED from end-of-day data",
       })),
     );
   return (

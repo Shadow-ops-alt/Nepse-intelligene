@@ -409,7 +409,7 @@ export function ScreenerPage({
           signalRating: row.signalRating,
           signalScore: row.signalScore,
           state: row.provenance.state,
-          classification: "DERIVED from " + row.provenance.classification,
+          classification: "DERIVED",
         };
       }),
     );

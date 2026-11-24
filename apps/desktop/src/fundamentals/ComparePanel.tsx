@@ -477,7 +477,7 @@ function SideBySide({ entries }: { entries: Entry[] }) {
       }
       footer={
         <span>
-          Values are UNVERIFIED as displayed; <strong>d</strong> marks DERIVED values
+          Values are as displayed; <strong>d</strong> marks DERIVED values
           (P/E or P/B from the last close when unpublished, ROE ≈ EPS ÷ BVPS, earnings
           yield, dividend yield = cash % × paid-up value ÷ close, market cap = shares ×
           close). Loss-making P/E and P/B are not ranked. Size metrics (market cap,
@@ -829,7 +829,7 @@ function DividendCard({ entries }: { entries: Entry[] }) {
       title="Dividend history (5 fiscal years)"
       subtitle="Cash % and bonus % of paid-up value as listed by Merolagani, gaps filled from ShareSansar dividend announcements"
       action={<ProvenanceLine provenance={provenance} />}
-      footer="UNVERIFIED as displayed. Merolagani’s dividend history comes first; ShareSansar dividend announcements (company events) fill years or bonus figures it does not list, and a disagreement is marked ⚠ with the Merolagani value kept. A year neither page lists is shown as — and is not counted as zero (0% years are not listed). Averages use only listed years. Yield on close is DERIVED: cash % × paid-up value per share ÷ last stored close."
+      footer="As displayed. Merolagani’s dividend history comes first; ShareSansar dividend announcements (company events) fill years or bonus figures it does not list, and a disagreement is marked ⚠ with the Merolagani value kept. A year neither page lists is shown as — and is not counted as zero (0% years are not listed). Averages use only listed years. Yield on close is DERIVED: cash % × paid-up value per share ÷ last stored close."
     >
       {!anyActions ? (
         <MissingData
@@ -898,7 +898,7 @@ function DividendCard({ entries }: { entries: Entry[] }) {
             </tbody>
           </table>
           <p className="muted small" style={{ margin: "8px 10px" }}>
-            Cells read “cash % + bonus % B”. <Badge tone="warn">unofficial</Badge>
+            Cells read “cash % + bonus % B”.
           </p>
         </div>
       )}

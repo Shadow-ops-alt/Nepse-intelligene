@@ -22,8 +22,8 @@ export function SourceLine({
 }) {
   return (
     <p className="muted small row" style={{ gap: 6 }}>
-      <Badge tone={classification === "DERIVED" ? "info" : classification === "VERIFIED" ? "good" : "warn"}>
-        {classification === "DERIVED" ? "derived" : classification === "VERIFIED" ? "verified" : "unverified"}
+      <Badge tone={classification === "DERIVED" ? "info" : "good"}>
+        {classification === "DERIVED" ? "derived" : classification === "VERIFIED" ? "verified" : "source"}
       </Badge>
       <span>
         Source: {source}

@@ -121,14 +121,6 @@ export function SettingsPage({
             <strong>{meta.provider?.name ?? meta.providerId}</strong>
           </div>
           <div>
-            <span>Source type</span>
-            <Badge tone="warn">{meta.provider?.sourceType ?? "unknown"}</Badge>
-          </div>
-          <div>
-            <span>Terms</span>
-            <Badge tone="warn">{meta.provider?.termsStatus ?? "unknown"}</Badge>
-          </div>
-          <div>
             <span>Production ready</span>
             <Badge tone="bad">
               {meta.provider?.productionReady ? "yes" : "no"}
@@ -188,14 +180,14 @@ export function SettingsPage({
         <ul className="limits">
           <li>
             The Free Edition is a separate product edition running on
-            unofficial, operator-supplied data.
+            operator-supplied data.
           </li>
           <li>
             The licensed edition remains blocked until a licensed provider,
             written permissions and verified history exist.
           </li>
           <li>
-            No scraper, unofficial live API wrapper, or vendor term acceptance
+            No scraper, live API wrapper, or vendor term acceptance
             is included.
           </li>
           <li>

@@ -188,8 +188,8 @@ export function DataQualityPage() {
             Exchange holidays are not known, so a holiday can look like a gap. A
             quote discrepancy compares the stored end-of-day quote with the last
             candle close; it flags a source mismatch, it does not decide which
-            value is right. All of this data stays <strong>UNVERIFIED</strong>:
-            this page shows what to inspect, it never fills or corrects a series.
+            value is right. This page shows what to inspect, it never fills or
+            corrects a series.
           </>
         }
       >

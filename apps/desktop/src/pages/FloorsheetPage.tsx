@@ -256,7 +256,6 @@ export function FloorsheetPage({
             <Stat
               label="Trades"
               value={aggregate.trades.toLocaleString()}
-              badge={<Badge tone="warn">unverified</Badge>}
               hint={`${aggregate.symbols.size} symbols · ${aggregate.brokers.size} brokers`}
             />
             <Stat
@@ -340,7 +339,7 @@ export function FloorsheetPage({
       <SourceLine
         source={
           provenance
-            ? `${provenance.providerId} floorsheet (${provenance.sourceType})`
+            ? `${provenance.providerId} floorsheet`
             : "stored floorsheet"
         }
         fetchedAt={provenance?.fetchedAt ?? null}
@@ -453,7 +452,7 @@ function TopStocks({
           <CsvButton onClick={exportRows} count={sorted.length} />
         </div>
       }
-      footer="VWAP = Σ amount ÷ Σ quantity over the day's contracts. % of turnover is the symbol's share of the summed contract amounts. Derived from unofficial floorsheet trades."
+      footer="VWAP = Σ amount ÷ Σ quantity over the day's contracts. % of turnover is the symbol's share of the summed contract amounts. Derived from public floorsheet trades."
     >
       {sorted.length === 0 ? (
         <EmptyState title="No symbol matches" />
@@ -911,7 +910,7 @@ function StockByBroker({
             <CsvButton onClick={exportRows} count={entry?.brokers.size ?? 0} />
           </div>
         }
-        footer="Derived from unofficial floorsheet trades. Broker numbers are as published; names are not in the source. Top-5 share = quantity handled by the five largest brokers on that side ÷ total quantity."
+        footer="Derived from public floorsheet trades. Broker numbers are as published; names are not in the source. Top-5 share = quantity handled by the five largest brokers on that side ÷ total quantity."
       >
         {!entry ? (
           <EmptyState title="Pick a symbol" />

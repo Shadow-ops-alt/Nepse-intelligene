@@ -201,7 +201,7 @@ function eventsProblem(state: EventsState, label: string): ReactNode | null {
         Use <strong>Fetch company profiles</strong> on the{" "}
         <strong>Data</strong> page to load per-company dividend, AGM,
         right-share, announcement and company-news history from the public
-        company pages (ShareSansar, unofficial). Nothing is shown until that
+        company pages (ShareSansar). Nothing is shown until that
         details pass runs.
       </>
     );
@@ -806,7 +806,6 @@ function RightsTab({
     <Card
       title="Right shares"
       subtitle="Per-company right-share history: ratio, units, price, opening/closing and book-closure dates"
-      action={<Badge tone="warn">unverified</Badge>}
       footer={<EventsSourceLine states={[state]} />}
     >
       {pipelineRights > 0 && (
@@ -883,7 +882,6 @@ function DividendsTab({
               { value: "agm", label: `AGM${agmState.data ? ` (${agmState.data.total ?? agmState.data.events.length})` : ""}` },
             ]}
           />
-          <Badge tone="warn">unverified</Badge>
         </div>
       }
       footer={<EventsSourceLine states={[dividendState, agmState]} />}
@@ -976,8 +974,7 @@ function MergersTab({
       <Card
         title="Announcements & company news"
         subtitle={`${eventMatches.length} matching rows from company announcements and company news`}
-        action={<Badge tone="warn">unverified</Badge>}
-        footer={<EventsSourceLine states={[announcementState, companyNewsState]} />}
+          footer={<EventsSourceLine states={[announcementState, companyNewsState]} />}
       >
         {loadingEvents ? (
           <Spinner label="Scanning company announcements" />
@@ -1004,8 +1001,7 @@ function MergersTab({
         <Card
           title="Market news mentioning M&A"
           subtitle={`${newsMatches.length} of ${newsState.data?.news.length ?? 0} stored headlines`}
-          action={<Badge tone="warn">unverified</Badge>}
-          footer={
+              footer={
             <SourceLine
               source="stored market news"
               fetchedAt={newsState.data?.provenance?.fetchedAt ?? null}
@@ -1043,8 +1039,7 @@ function MergersTab({
         <Card
           title="Merged / delisted in the security master"
           subtitle={`${inactive.length} companies whose status is not active`}
-          action={<Badge tone="warn">unverified</Badge>}
-          footer={
+              footer={
             <>
               The master records only the current status, not the merger
               partner, swap ratio or date. A “delisted” status may have other
@@ -1129,8 +1124,7 @@ function LockInTab({
       <Card
         title="Lock-in & promoter-share announcements"
         subtitle={`${matches.length} matches in ${scanned.toLocaleString()} stored announcements and company-news rows`}
-        action={<Badge tone="warn">unverified</Badge>}
-        footer={<EventsSourceLine states={[announcementState, companyNewsState]} />}
+          footer={<EventsSourceLine states={[announcementState, companyNewsState]} />}
       >
         {announcementState.loading || companyNewsState.loading ? (
           <Spinner label="Scanning announcements" />

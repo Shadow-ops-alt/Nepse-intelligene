@@ -234,8 +234,19 @@ formulas as `@stock/analytics`.
 
 ## 7. Data updates
 
-The overflow menu has **Check for data updates**. It downloads a mobile pack
-zip from a configurable URL, default:
+The app checks for a newer pack automatically, four seconds after launch and
+then every six hours while it stays open. The check reads a small JSON manifest,
+default:
+
+```
+https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/NEPSE-Terminal-0.7.0-mobile-pack.json
+```
+
+The manifest carries the pack `version` and the zip `url`. When the version
+differs from the installed pack, the app downloads the zip and installs it with
+no dialog, then reloads the page. The overflow menu also has **Check for data
+updates** for a manual check; without a hosted `packManifestUrl` it opens a URL
+dialog that defaults to the zip asset:
 
 ```
 https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/NEPSE-Terminal-0.7.0-mobile-pack.zip
@@ -244,12 +255,13 @@ https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/NEP
 Before installing, every file listed in the archive's `manifest.json` is
 checked with SHA-256. The new pack is extracted to `filesDir/pack-next`; only a
 fully verified pack replaces `filesDir/pack`. The downloaded pack is preferred
-over the APK pack, and missing files fall back to the APK copy.
+over the APK pack, and missing files fall back to the APK copy. A failed or
+unreachable check is silent; the bundled pack keeps working offline.
 
-Status: the downloader, hash verification and install path are implemented, and
-the 0.7.0 pack is published as a release asset. The app still works without an
-update; the bundled pack is used until a newer one is installed. The generator
-supports `--zip <path>` to produce the release archive.
+Publishing an update: generate the pack with a new `--version` (the current
+release uses the latest session date, for example `2026-11-24`), upload the zip,
+and upload the matching manifest JSON. The generator supports `--zip <path>` to
+produce the release archive.
 
 ## 8. Verification
 

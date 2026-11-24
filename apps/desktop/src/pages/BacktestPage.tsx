@@ -476,7 +476,7 @@ export function BacktestPage() {
 
       <Notice tone="warn">
         <strong>Hypothetical research.</strong> Every output row is DERIVED
-        from raw prices and resolved actions. Prices are unofficial exchange
+        from raw prices and resolved actions. Prices are exchange
         data. The result is a model, not a forecast and not investment advice.
         Corporate-action coverage is shown below and a symbol is refused when
         any action affecting it is unresolved. No-lookahead guarantees cover this
@@ -740,7 +740,7 @@ export function BacktestPage() {
 
       <Card
         title="Coverage gate"
-        subtitle="Raw candles are unofficial and unadjusted. A symbol runs only when every stored action has an ex-date and the adjusted series validates."
+        subtitle="Raw candles are unadjusted. A symbol runs only when every stored action has an ex-date and the adjusted series validates."
       >
         {coverageBusy ? (
           <Spinner label="Checking corporate-action coverage" />

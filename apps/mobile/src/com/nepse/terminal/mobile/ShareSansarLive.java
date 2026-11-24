@@ -30,9 +30,9 @@ final class ShareSansarLive {
     private static final String USER_AGENT =
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
                     + "(KHTML, like Gecko) Chrome/131.0 Safari/537.36";
-    private static final String SOURCE = "ShareSansar Live Trading (unofficial)";
+    private static final String SOURCE = "ShareSansar Live Trading";
     private static final String DISCLAIMER =
-            "Unofficial read of ShareSansar's public live-trading table. "
+            "Read of ShareSansar's public live-trading table. "
                     + "Not provided or endorsed by NEPSE. Prices may be delayed or wrong, "
                     + "and are never written to the end-of-day store.";
     private static final long TTL_MS = 30_000;

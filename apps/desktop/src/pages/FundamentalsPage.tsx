@@ -280,7 +280,7 @@ export function FundamentalsPage({ onOpenSymbol }: { onOpenSymbol: (s: string) =
         <Stat
           label="EPS published"
           value={`${covOf("EPS")?.published ?? 0} / ${total}`}
-          hint="as displayed, unverified"
+          hint="as displayed"
         />
         <Stat
           label="ROE published"
@@ -320,8 +320,8 @@ export function FundamentalsPage({ onOpenSymbol }: { onOpenSymbol: (s: string) =
         />
         <p className="muted small" style={{ margin: 0 }}>
           Key ratios and dividend history as displayed by Merolagani, and the latest
-          quarterly statement as displayed by ShareSansar. Everything stored is
-          unofficial (UNVERIFIED); anything computed here is marked{" "}
+          quarterly statement as displayed by ShareSansar. Anything computed
+          here is marked{" "}
           <strong>d</strong> (DERIVED).
         </p>
       </Card>
@@ -411,7 +411,7 @@ function accessor(row: ScreenRow, key: SortKey): number | string | null {
   }
 }
 
-const basis = (val: Val) => (val.value === null ? "" : val.derived ? "DERIVED" : "UNVERIFIED");
+const basis = (val: Val) => (val.value === null ? "" : val.derived ? "DERIVED" : "SOURCE");
 
 function UnavailableFooter({ items, total, statements }: { items: CoverageItem[]; total: number; statements: number }) {
   const missing = items.filter((item) => item.published + item.derived === 0).map((item) => item.label);
@@ -779,7 +779,7 @@ function SectorPanel({
           record[`${column.id}_median`] = row.medians[column.id]?.value ?? null;
           record[`${column.id}_n`] = row.medians[column.id]?.n ?? 0;
         }
-        record.classification = includeDerived ? "DERIVED (median of unverified + derived values)" : "DERIVED (median of unverified values)";
+        record.classification = includeDerived ? "DERIVED (median of source + derived values)" : "DERIVED (median of source values)";
         return record;
       }),
     );
@@ -823,7 +823,7 @@ function SectorPanel({
             derived
           />
           <span>
-            Medians are DERIVED from UNVERIFIED values as displayed by the source pages.
+            Medians are DERIVED from source values as displayed by the source pages.
             {includeDerived
               ? " Where a ratio is unpublished, its derived value (P/E or P/B from the last close, ROE ≈ EPS ÷ BVPS, market cap = shares × close) is included; untick to use published values only."
               : " Only published values are used."}{" "}

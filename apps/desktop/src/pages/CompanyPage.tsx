@@ -352,7 +352,6 @@ export function CompanyPage({
                     <AsOf value={provenance?.asOf} ageSeconds={provenance?.ageSeconds} />
                     {provenance && (
                       <span>
-                        source {provenance.sourceType} · terms {provenance.termsStatus} ·
                         fetched {provenance.fetchedAt.slice(0, 16).replace("T", " ")}
                       </span>
                     )}
@@ -365,9 +364,8 @@ export function CompanyPage({
                   </div>
                 ) : (
                   <div className="row" style={{ gap: 14 }}>
-                    <Badge tone="warn">UNVERIFIED</Badge>
                     <span>
-                      Sampled from the unofficial live feed while the app is open.
+                      Sampled from the live feed while the app is open.
                       Intraday history before the chart opened is not available;
                       end-of-day history is under 1D.
                     </span>

@@ -299,7 +299,7 @@ export function matchAlerts(input: {
         ruleId: rule.id,
         symbol: rule.symbol,
         title: `${rule.symbol} is ${rule.condition} ${rule.price.toLocaleString("en-US")}`,
-        detail: `${quote.live ? "Live LTP (unofficial)" : "Last end-of-day close"} ${quote.price.toLocaleString("en-US")} at ${quote.asOf.slice(0, 16).replace("T", " ")}`,
+        detail: `${quote.live ? "Live LTP" : "Last end-of-day close"} ${quote.price.toLocaleString("en-US")} at ${quote.asOf.slice(0, 16).replace("T", " ")}`,
         direction: rule.condition === "above" ? "bullish" : "bearish",
         session: quote.asOf.slice(0, 10),
         source: quote.live ? "price-live" : "price-eod",

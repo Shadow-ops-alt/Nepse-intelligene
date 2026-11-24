@@ -655,7 +655,7 @@ export function LiveIntradayChart({
     <div className="chart-shell">
       <div className="chart-legend">
         <span className={`badge badge-${liveTone}`}>
-          {state.marketOpen === true ? "LIVE · unofficial" : "idle · unofficial"}
+          {state.marketOpen === true ? "LIVE" : "idle"}
         </span>
         <span className="legend-item">
           {source === "index" ? "NEPSE index" : symbol}

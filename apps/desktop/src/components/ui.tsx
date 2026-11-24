@@ -38,7 +38,7 @@ const STATE_TONE: Record<DataState, BadgeTone> = {
 
 const CLASSIFICATION_LABEL: Record<DataClassification, string> = {
   VERIFIED: "Verified",
-  UNVERIFIED: "Unverified",
+  UNVERIFIED: "",
   DERIVED: "Derived",
   DEMO: "Demo",
   MISSING: "Missing",
@@ -75,7 +75,8 @@ export function DataStateBadge({
       </span>
       {showClassification &&
         classification &&
-        classification !== "VERIFIED" && (
+        classification !== "VERIFIED" &&
+        classification !== "UNVERIFIED" && (
           <span className={`badge badge-${CLASSIFICATION_TONE[classification]}`}>
             {CLASSIFICATION_LABEL[classification]}
           </span>

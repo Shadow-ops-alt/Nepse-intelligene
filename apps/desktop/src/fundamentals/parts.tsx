@@ -68,8 +68,7 @@ export function ProvenanceLine({
       <DataStateBadge state={state} classification={classification} />
       {derived && <Badge tone="info">derived columns</Badge>}
       <span className="muted small">
-        source {sources && sources.length > 0 ? sources.join(", ") : (provenance?.sourceType ?? "public web pages")}
-        {provenance ? ` · terms ${provenance.termsStatus}` : ""}
+        source {sources && sources.length > 0 ? sources.join(", ") : "public web pages"}
         {` · as of ${when ? when.slice(0, 10) : "—"}`}
         {provenance?.fetchedAt ? ` · imported ${formatTimestamp(provenance.fetchedAt)}` : ""}
       </span>

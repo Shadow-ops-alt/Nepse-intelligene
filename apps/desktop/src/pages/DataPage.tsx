@@ -260,8 +260,7 @@ export function DataPage({
                 : `${refresh.intervalMinutes} minutes`}
               , the app checks the public archive for new end-of-day sessions,
               imports them into this database and keeps the raw snapshot. Your
-              watchlist, portfolio and notes are never touched. The archive is
-              unofficial, so imported rows stay labelled UNVERIFIED.
+              watchlist, portfolio and notes are never touched.
             </p>
 
             {refresh.running ? (
@@ -438,24 +437,6 @@ export function DataPage({
               <code>{meta.provider.id}</code>
             </div>
             <div>
-              <span>Source</span>
-              <Badge tone="warn">{meta.provider.sourceType}</Badge>
-            </div>
-            <div>
-              <span>Terms</span>
-              <Badge tone="warn">{meta.provider.termsStatus}</Badge>
-            </div>
-            <div>
-              <span>Classification</span>
-              <Badge
-                tone={
-                  meta.dataState.classification === "VERIFIED" ? "good" : "warn"
-                }
-              >
-                {meta.dataState.classification}
-              </Badge>
-            </div>
-            <div>
               <span>Production ready</span>
               <Badge tone="bad">
                 {meta.provider.productionReady ? "yes" : "no"}
@@ -476,17 +457,12 @@ export function DataPage({
       <Card
         title="Dataset availability"
         subtitle="What is actually stored, separate from what the provider could read"
-        action={
-          coverage ? (
-            <Badge tone="warn">{coverage.classification}</Badge>
-          ) : undefined
-        }
         footer={
           <>
             A capability the provider implements is not proof that data exists:
             this source publishes company profiles, displayed key ratios,
             corporate actions, the latest floorsheet, news, the IPO pipeline and
-            mutual-fund NAVs, all labelled unverified. It publishes no free
+            mutual-fund NAVs. It publishes no free
             intraday history and no mutual-fund portfolio holdings, so those stay
             unavailable and are never filled with mock or inferred values.
             Indicators, breadth and sector heat elsewhere in the app are labelled{" "}
@@ -506,7 +482,7 @@ export function DataPage({
                   <th>Dataset</th>
                   <th>Stored</th>
                   <th>Session</th>
-                  <th>Classification</th>
+                  <th>Basis</th>
                   <th>Provider reads it</th>
                   <th>Notes</th>
                 </tr>
@@ -540,10 +516,14 @@ export function DataPage({
                               ? "info"
                               : dataset.classification === "MISSING"
                                 ? "neutral"
-                                : "warn"
+                                : "good"
                           }
                         >
-                          {dataset.classification}
+                          {dataset.classification === "DERIVED"
+                            ? "derived"
+                            : dataset.classification === "MISSING"
+                              ? "missing"
+                              : "source"}
                         </Badge>
                       </td>
                       <td className="muted">{dataset.implemented ? "yes" : "no"}</td>
@@ -860,7 +840,7 @@ export function DataPage({
         subtitle="Automatic by default; the manual pipeline remains for operators"
       >
         <p className="muted">
-          The Free Edition reads an unofficial, community-maintained end-of-day
+          The Free Edition reads a community-maintained end-of-day
           archive. The app fetches it on launch and every few hours, keeps the
           raw snapshot, validates every row, and imports into the same namespace
           without deleting your watchlist or portfolio. If the archive has not
@@ -926,8 +906,8 @@ export function DataPage({
           </li>
           <li>Free sources can change or disappear without notice.</li>
           <li>
-            Redistribution rights for the public web sources are unverified; do
-            not publish a database containing this data.
+            Redistribution rights for the public web sources are not granted;
+            do not publish a database containing this data.
           </li>
         </ul>
         <p className="muted small">

@@ -90,7 +90,7 @@ const RESEARCH: NavItem[] = [
     path: "/live",
     label: "Live market",
     title: "Live market",
-    crumb: "Unofficial live LTP and EOD table from ShareSansar, refreshed while the market is open",
+    crumb: "Live LTP and EOD table from ShareSansar, refreshed while the market is open",
     icon: Icon.Clock,
     key: "2",
   },
@@ -590,10 +590,10 @@ export function App() {
       <main className="main">
         {meta?.edition === "free" && (
           <div className="edition-strip" role="note">
-            <strong>Free Edition · unofficial data</strong>
+            <strong>Free Edition</strong>
             <span>
-              End-of-day archive, terms unverified · analytics are derived
-              mathematics · not investment advice
+              End-of-day archive · analytics are derived mathematics · not
+              investment advice
             </span>
           </div>
         )}
@@ -744,9 +744,6 @@ export function App() {
         </span>
         <span className="status-item">
           Source <strong>{meta?.provider?.name ?? meta?.providerId ?? "—"}</strong>
-        </span>
-        <span className="status-item">
-          Classification <strong>{meta?.dataState.classification ?? "—"}</strong>
         </span>
         <span className="status-item">
           <span

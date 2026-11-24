@@ -3,10 +3,10 @@ import type { FetchLike } from "./session";
 
 /** Public live-trading page used as the fallback when nepalstock.com blocks us. */
 export const SHARESANSAR_PAGE = "https://www.sharesansar.com/live-trading";
-export const SHARESANSAR_SOURCE = "ShareSansar Live Trading (unofficial)";
+export const SHARESANSAR_SOURCE = "ShareSansar Live Trading";
 export const SHARESANSAR_DISCLAIMER =
-  "UNVERIFIED unofficial live data read from ShareSansar's public live-trading page. " +
-  "Not provided, endorsed or verified by NEPSE; it may be delayed, incomplete or wrong. " +
+  "Live data read from ShareSansar's public live-trading page. " +
+  "Not provided or endorsed by NEPSE; it may be delayed, incomplete or wrong. " +
   "It is never written to the end-of-day store.";
 
 const CACHE_TTL_MS = 30_000;

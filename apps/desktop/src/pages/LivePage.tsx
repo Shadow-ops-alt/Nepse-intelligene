@@ -140,7 +140,7 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
   return (
     <div className="stack">
       <Notice tone="warn">
-        <strong>LIVE · unofficial.</strong> {status.data.disclaimer} Live prices
+        <strong>LIVE.</strong> {status.data.disclaimer} Live prices
         are shown here only — they are never written into the end-of-day
         history used by charts, signals and the screener.
       </Notice>
@@ -219,7 +219,6 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
               />
-              <Badge tone="warn">unofficial</Badge>
             </div>
           }
         >
@@ -283,7 +282,7 @@ export function LivePage({ onOpenSymbol }: { onOpenSymbol: (symbol: string) => v
 
         <Card
           title={depthSymbol ? `Market depth · ${depthSymbol}` : "Market depth"}
-          subtitle="Best bids and asks (live, unofficial; trading hours only)"
+          subtitle="Best bids and asks (live; trading hours only)"
         >
           {!depthSymbol ? (
             <EmptyState title="Pick a symbol">Press “Depth” on any row.</EmptyState>
