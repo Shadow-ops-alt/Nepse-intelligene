@@ -310,8 +310,9 @@ public class MainActivity extends Activity {
             text.append("\nPack size: ").append(String.format(Locale.US, "%.1f MB",
                     bytes / 1024d / 1024d));
         }
-        text.append("\n\nThis pack is a snapshot. Live prices, intraday charts and "
-                + "backtesting need a newer pack or the desktop app.");
+        text.append("\n\nThis pack is a snapshot. The Live market page reads "
+                + "ShareSansar when the phone is online. Intraday charts and "
+                + "backtesting still need the desktop app.");
         new AlertDialog.Builder(this)
                 .setTitle("Data pack")
                 .setMessage(text.toString())

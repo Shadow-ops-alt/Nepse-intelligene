@@ -219,7 +219,9 @@ never enter the product database.
 
 Since 2026-11-14 the Free Edition shows unofficial live LTP, market summary,
 NEPSE index and market depth from nepalstock.com's internal endpoints, using
-the token method of the MIT-licensed `nepseman-api` package. This is a product
+the token method of the MIT-licensed `nepseman-api` package. Since 2026-11-24
+it falls back to the public ShareSansar live-trading table when those endpoints
+are blocked; market depth and intraday remain nepalstock-only. This is a product
 owner decision; NEPSE has not authorised it and may block it. The service:
 
 - polls only while a client asks: every 10 s while the market is open, at most

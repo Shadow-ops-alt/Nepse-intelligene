@@ -57,7 +57,7 @@ Legend: ✅ done · 🟡 partial (works, with a stated data limit) · ⛔ blocke
 
 | Feature | Status | Where | Notes |
 |---|---|---|---|
-| Live market view / live LTP | ✅ (unofficial) | Live market | nepalstock.com internal endpoints via the nepseman-api token method; product-owner decision, on by default. Labelled LIVE · unofficial, never stored as history. Verified: 334/334 last-session LTPs equal the archive closes. |
+| Live market view / live LTP | ✅ (unofficial) | Live market | nepalstock.com internal endpoints via the nepseman-api token method, with the public ShareSansar live-trading table as fallback when nepalstock.com is blocked. On Android the fallback is served by the app's local server, so no PC is needed. Labelled LIVE · unofficial, never stored as history. |
 | Market depth | 🟡 | Live market → Depth | Wired; field mapping unconfirmed until a trading session. |
 | Intraday candles (1m–1h, current session) | ✅ (session-only) | Company → Price, Market → NEPSE index | Built locally from live snapshots sampled while the app is open: 1m, 2m, 3m, 5m, 10m, 15m, 30m, 1h. No historical backfill — bars exist only from when the chart was first opened. Labelled UNVERIFIED, never written to EOD history; `1D` remains the stored end-of-day series. |
 
