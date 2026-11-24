@@ -73,7 +73,7 @@ Delete or disable these before handing the project over.
 cd /home/xenos/Public/nepse-intelligene
 npx --yes pnpm@12.16.1 build:web
 bash apps/mobile/build.sh
-adb install -r apps/mobile/release/NEPSE-Terminal-0.6.0-standalone.apk
+adb install -r apps/mobile/release/NEPSE-Terminal-0.7.0-standalone.apk
 ```
 
 The APK bundles the web UI, the five-year data pack, and the hosted config.
@@ -94,9 +94,11 @@ ephemeral port and the user must sign in again.
 
 ## Limits
 
-- Live LTP and intraday are not part of hosted mode. Market data is the local
-  pack; a Supabase Edge Function or worker would be needed for live quotes.
-- Personal pages require network access. The market pack still works offline.
+- Live LTP is read from the public ShareSansar live-trading table by the app's
+  local server while the phone is online, so hosted mode adds no live-data
+  infrastructure and no key. Intraday bars are not available.
+- Personal pages require network access. The market pack still works offline;
+  the Live market page shows the last fetched values with an error when offline.
 - The pack is dated 2026-11-13. Use the in-app data update action when a newer
   pack is published.
 - The APK is debug-signed and the Windows installer is unsigned.

@@ -198,8 +198,12 @@ Served from `filesDir` (read/write, survives a cold restart):
 
 Hidden or explicitly unavailable:
 
-- **Live market** is hidden from the navigation and `#/live` redirects to
-  Market. `/api/live/*` and `/api/intraday` return `503
+- **Live market** is available in navigation. `/api/live/status`,
+  `/api/live/market`, `/api/live/summary` and `/api/live/depth` read the public
+  ShareSansar live-trading table over HTTPS, cached for 30 seconds. When the
+  phone is offline the page keeps the last values and shows the error. Market
+  depth is not published by that source.
+- `/api/intraday` returns `503
   {"error":"Not available in the offline mobile app"}`.
 - **Backtest** is hidden and `#/backtest` redirects to Market.
   `/api/backtest/*` returns the same 503.
@@ -234,7 +238,7 @@ The overflow menu has **Check for data updates**. It downloads a mobile pack
 zip from a configurable URL, default:
 
 ```
-https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/NEPSE-Terminal-0.6.0-mobile-pack.zip
+https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/NEPSE-Terminal-0.7.0-mobile-pack.zip
 ```
 
 Before installing, every file listed in the archive's `manifest.json` is
@@ -242,10 +246,9 @@ checked with SHA-256. The new pack is extracted to `filesDir/pack-next`; only a
 fully verified pack replaces `filesDir/pack`. The downloaded pack is preferred
 over the APK pack, and missing files fall back to the APK copy.
 
-Status: the downloader, hash verification and install path are implemented,
-but they have not been exercised end-to-end because no mobile-pack release
-asset has been published yet. Without an update, the data is as fresh as the
-bundled pack. The pack can also be updated by shipping a new APK. The generator
+Status: the downloader, hash verification and install path are implemented, and
+the 0.7.0 pack is published as a release asset. The app still works without an
+update; the bundled pack is used until a newer one is installed. The generator
 supports `--zip <path>` to produce the release archive.
 
 ## 8. Verification
@@ -271,8 +274,9 @@ API 34 emulator, drive the WebView over the DevTools protocol and assert
 1. The loaded URL is `http://127.0.0.1:<ephemeral>`, not port 4310.
 2. Every resource is same-origin; no request reaches the PC API.
 3. Market overview renders pack data.
-4. Live market and Backtest are absent from the visible navigation; their
-   routes redirect to Market; their APIs return 503.
+4. Live market is present in the navigation and renders the ShareSansar table
+   (session, closed/open state, index, turnover, 349 scrips); Backtest is absent
+   and its route redirects to Market; `/api/backtest/*` returns 503.
 5. Company page loads the 1D chart, a canvas is present, and only the 1D
    timeframe is visible.
 6. Watchlist add through the UI persists in `/api/watchlist`.
@@ -301,7 +305,9 @@ sha256: 6833d6dfa81f782f598b8a32ca84091997e554e8a0c28fa078567ad64150f45b
 
 ## 9. Limitations
 
-- The pack is a snapshot. There is no live LTP, no intraday history and no
+- The pack is a snapshot. Live prices on the **Live market** page come from the
+  public ShareSansar live-trading table while the phone is online; they are
+  never mixed into the end-of-day store. There is no intraday history and no
   background refresh.
 - Backtesting and archive imports are unavailable offline and hidden.
 - Only the latest floorsheet day and its broker flows are in the pack. The

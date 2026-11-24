@@ -24,16 +24,17 @@ import {
   NepseSession,
   type FetchLike,
 } from "./session";
+import { createShareSansarReader } from "./sharesansar";
 
 /** The label the UI shows next to every live value. */
 export const LIVE_LABEL =
-  "LIVE · unofficial (nepalstock.com via reverse-engineered token)";
-export const LIVE_SOURCE = "nepalstock.com internal web endpoints (unofficial)";
+  "LIVE · unofficial (nepalstock.com, ShareSansar fallback)";
+export const LIVE_SOURCE = "nepalstock.com and ShareSansar live pages (unofficial)";
 export const LIVE_DISCLAIMER =
-  "UNVERIFIED unofficial live data read from nepalstock.com's internal web endpoints with a " +
-  "reverse-engineered access token (the method of the MIT-licensed nepseman-api package). " +
-  "Not provided, endorsed or verified by NEPSE; it may be delayed, incomplete, wrong or " +
-  "unavailable (nepalstock.com blocks some networks/regions). It is never written to the " +
+  "UNVERIFIED unofficial live data read from nepalstock.com's internal web endpoints " +
+  "and, as a fallback, ShareSansar's public live-trading page. Not provided, endorsed " +
+  "or verified by NEPSE; it may be delayed, incomplete, wrong or unavailable " +
+  "(nepalstock.com blocks some networks/regions). It is never written to the " +
   "end-of-day store.";
 
 /** Data freshness while the market is open. */
@@ -286,44 +287,88 @@ export function createLiveService(options: LiveServiceOptions = {}): LiveService
     baseUrl: options.baseUrl,
     tokenProvider: options.tokenProvider ?? createWasmTokenProvider({ env }),
   });
+  const shareSansar = createShareSansarReader(fetchImpl, now);
 
-  const statusEntry = new Cached<MarketState>(now, async () =>
-    mapMarketState(await session.marketStatus()),
-  );
+  const statusEntry = new Cached<MarketState>(now, async () => {
+    try {
+      return mapMarketState(await session.marketStatus());
+    } catch (error) {
+      try {
+        return (await shareSansar.read()).state;
+      } catch {
+        throw error;
+      }
+    }
+  });
 
   const liveEntry = new Cached<LiveMarketValue>(now, async () => {
-    const payload = await session.getJson(NEPSE_PATHS.liveMarket);
-    if (isRecord(payload) && asRows(payload).length === 0 && Object.keys(payload).length > 0) {
-      throw new Error(
-        `nepalstock.com live-market payload has an unexpected shape (keys: ${Object.keys(payload).slice(0, 6).join(", ")})`,
-      );
+    try {
+      const payload = await session.getJson(NEPSE_PATHS.liveMarket);
+      if (isRecord(payload) && asRows(payload).length === 0 && Object.keys(payload).length > 0) {
+        throw new Error(
+          `nepalstock.com live-market payload has an unexpected shape (keys: ${Object.keys(payload).slice(0, 6).join(", ")})`,
+        );
+      }
+      const mapped = mapLiveMarket(payload);
+      if (mapped.sourceRows > 0 && mapped.rows.length === 0) {
+        throw new Error(
+          `nepalstock.com live-market payload had ${mapped.sourceRows} rows but none with a recognisable symbol and last traded price (format changed?)`,
+        );
+      }
+      return { rows: mapped.rows, asOf: mapped.asOf };
+    } catch (error) {
+      try {
+        const fallback = await shareSansar.read();
+        if (fallback.rows.length > 0) {
+          return { rows: fallback.rows, asOf: fallback.state.asOf };
+        }
+      } catch {
+        /* fall through to the original error */
+      }
+      throw error;
     }
-    const mapped = mapLiveMarket(payload);
-    if (mapped.sourceRows > 0 && mapped.rows.length === 0) {
-      throw new Error(
-        `nepalstock.com live-market payload had ${mapped.sourceRows} rows but none with a recognisable symbol and last traded price (format changed?)`,
-      );
-    }
-    return { rows: mapped.rows, asOf: mapped.asOf };
   });
 
   const summaryEntry = new Cached<LiveSummaryFigures>(now, async () => {
-    const payload = await session.getJson(NEPSE_PATHS.marketSummary);
-    const figures = mapMarketSummary(payload);
-    const empty = Object.values(figures).every((value) => value === null);
-    if (empty && payload !== null && (asRows(payload).length > 0 || isRecord(payload))) {
-      throw new Error("nepalstock.com market-summary payload was not recognised (format changed?)");
+    try {
+      const payload = await session.getJson(NEPSE_PATHS.marketSummary);
+      const figures = mapMarketSummary(payload);
+      const empty = Object.values(figures).every((value) => value === null);
+      if (empty && payload !== null && (asRows(payload).length > 0 || isRecord(payload))) {
+        throw new Error("nepalstock.com market-summary payload was not recognised (format changed?)");
+      }
+      return figures;
+    } catch (error) {
+      try {
+        const fallback = await shareSansar.read();
+        const figures = fallback.summary;
+        if (Object.values(figures).some((value) => value !== null)) return figures;
+      } catch {
+        /* fall through to the original error */
+      }
+      throw error;
     }
-    return figures;
   });
 
   const indexEntry = new Cached<{ index: LiveIndex | null; asOf: string | null }>(now, async () => {
-    const payload = await session.getJson(NEPSE_PATHS.nepseIndex);
-    const mapped = mapNepseIndex(payload);
-    if (mapped.index === null && payload !== null && (asRows(payload).length > 0 || isRecord(payload))) {
-      throw new Error("nepalstock.com nepse-index payload had no recognisable NEPSE index (format changed?)");
+    try {
+      const payload = await session.getJson(NEPSE_PATHS.nepseIndex);
+      const mapped = mapNepseIndex(payload);
+      if (mapped.index === null && payload !== null && (asRows(payload).length > 0 || isRecord(payload))) {
+        throw new Error("nepalstock.com nepse-index payload had no recognisable NEPSE index (format changed?)");
+      }
+      return mapped;
+    } catch (error) {
+      try {
+        const fallback = await shareSansar.read();
+        if (fallback.index !== null) {
+          return { index: fallback.index, asOf: fallback.state.asOf };
+        }
+      } catch {
+        /* fall through to the original error */
+      }
+      throw error;
     }
-    return mapped;
   });
 
   const securitiesEntry = new Cached<Map<string, number>>(now, async () => {

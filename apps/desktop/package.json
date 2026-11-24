@@ -2,7 +2,7 @@
   "name": "@stock/desktop",
   "productName": "NEPSE Terminal",
   "desktopName": "nepse-terminal.desktop",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "private": true,
   "description": "NEPSE Terminal desktop shell (Free Edition)",
   "author": "NEPSE Terminal",

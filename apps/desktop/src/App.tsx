@@ -90,7 +90,7 @@ const RESEARCH: NavItem[] = [
     path: "/live",
     label: "Live market",
     title: "Live market",
-    crumb: "Unofficial live LTP from nepalstock.com, refreshed during trading hours",
+    crumb: "Unofficial live LTP and EOD table from ShareSansar, refreshed while the market is open",
     icon: Icon.Clock,
     key: "2",
   },

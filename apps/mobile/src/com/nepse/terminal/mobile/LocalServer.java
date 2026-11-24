@@ -443,9 +443,28 @@ public final class LocalServer {
             return;
         }
 
+        // ------------------------------------------------------ live market
+        // The offline pack is the end-of-day store. This fallback reads the
+        // public ShareSansar live-trading table when the phone has network.
+        if (path.equals("/api/live/status")) {
+            sendJson(out, 200, ShareSansarLive.statusJson().toString());
+            return;
+        }
+        if (path.equals("/api/live/market")) {
+            sendJson(out, 200, ShareSansarLive.marketJson().toString());
+            return;
+        }
+        if (path.equals("/api/live/summary")) {
+            sendJson(out, 200, ShareSansarLive.summaryJson().toString());
+            return;
+        }
+        if (path.equals("/api/live/depth")) {
+            sendJson(out, 200, ShareSansarLive.depthJson(query.get("symbol")).toString());
+            return;
+        }
+
         // -------------------------------------------------- unsupported online
-        if (path.startsWith("/api/live/")
-                || path.startsWith("/api/backtest/")
+        if (path.startsWith("/api/backtest/")
                 || path.equals("/api/intraday")
                 || path.equals("/api/refresh/run")
                 || path.equals("/api/import/preview")
@@ -855,8 +874,8 @@ public final class LocalServer {
     }
 
     private static String injectMobileShell(String html) {
-        String head = "<link rel=\"stylesheet\" href=\"/mobile/mobile.css\">"
-                + "<script defer src=\"/mobile/mobile.js\"></script>";
+        String head = "<link rel=\"stylesheet\" href=\"/mobile/mobile.css?v=0.7.0\">"
+                + "<script defer src=\"/mobile/mobile.js?v=0.7.0\"></script>";
         int index = html.indexOf("</head>");
         if (index >= 0) {
             return html.substring(0, index) + head + html.substring(index);

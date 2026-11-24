@@ -24,7 +24,7 @@
     /* Service workers are optional. */
   }
 
-  var HIDDEN_NAV = { "Live market": true, "Backtest": true };
+  var HIDDEN_NAV = { "Backtest": true };
 
   function hideUnsupportedNav() {
     var items = document.querySelectorAll("button.nav-item");
@@ -54,9 +54,6 @@
 
   function redirectLiveRoute() {
     var hash = window.location.hash || "";
-    if (hash === "#/live" || hash.indexOf("#/live/") === 0) {
-      window.location.hash = "#/market";
-    }
     if (hash === "#/backtest" || hash.indexOf("#/backtest/") === 0) {
       window.location.hash = "#/market";
     }
@@ -107,8 +104,10 @@
       '<span>Latest session <strong>' + escapeHtml(session) + '</strong></span>' +
       '<span>Generated <strong>' + escapeHtml(generated) + '</strong></span>' +
       '</div>' +
-      '<p class="muted small">Source: ' + escapeHtml(source) + '. Live prices, ' +
-      'intraday charts, backtests and archive imports are not available in the ' +
+      '<p class="muted small">Source: ' + escapeHtml(source) + '. The Live market ' +
+      'page reads the public ShareSansar live-trading table when the phone is ' +
+      'online, and keeps the last values with a warning when it cannot reach it. ' +
+      'Intraday charts, backtests and archive imports are not available in the ' +
       'offline app. Use the app menu (&#8942;) and <strong>Check for data updates</strong> ' +
       'to install a newer pack.</p>' +
       '</div>';
@@ -155,11 +154,20 @@
     });
   }
 
+  function syncSessionPill() {
+    var pill = document.querySelector(".session-pill");
+    if (!pill) return;
+    var hash = window.location.hash || "";
+    var live = hash === "#/live" || hash.indexOf("#/live/") === 0;
+    pill.style.display = live ? "none" : "";
+  }
+
   function apply() {
     hideUnsupportedNav();
     hideIntradayTimeframes();
     hideUpdateBanners();
     redirectLiveRoute();
+    syncSessionPill();
     applyDataPage();
   }
 

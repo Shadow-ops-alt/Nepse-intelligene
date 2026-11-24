@@ -40,7 +40,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
 
     private static final String TAG = "NepseMobile";
-    private static final String APP_VERSION = "0.6.0";
+    private static final String APP_VERSION = "0.7.0";
     private static final String PREFS_NAME = "nepse_terminal_mobile";
     private static final String PREF_UPDATE_URL = "update_url";
     private static final String DEFAULT_UPDATE_URL =
