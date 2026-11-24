@@ -545,6 +545,68 @@ describe("PersonalStore", () => {
     }
   });
 
+  it("stores journal chart snapshots without leaking them in reads", () => {
+    const db = store();
+    try {
+      const png =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+      const image = `data:image/png;base64,${png}`;
+
+      const created = db.addJournalEntry({
+        symbol: "NABIL",
+        side: "buy",
+        snapshotImage: image,
+      });
+      expect(created.hasSnapshot).toBe(true);
+      expect(created).not.toHaveProperty("snapshotImage");
+
+      const stored = db.getJournalSnapshot(created.id);
+      expect(stored?.mime).toBe("image/png");
+      expect(stored?.data.toString("base64")).toBe(png);
+
+      const listed = db.getJournalEntries({ symbol: "NABIL" });
+      expect(listed[0]?.hasSnapshot).toBe(true);
+      expect(listed[0]).not.toHaveProperty("snapshotImage");
+
+      // An update that does not mention the image keeps it.
+      const kept = db.updateJournalEntry(created.id, { reason: "kept" });
+      expect(kept?.hasSnapshot).toBe(true);
+      expect(db.getJournalSnapshot(created.id)).not.toBeNull();
+
+      // null removes it.
+      const removed = db.updateJournalEntry(created.id, {
+        snapshotImage: null,
+      });
+      expect(removed?.hasSnapshot).toBe(false);
+      expect(db.getJournalSnapshot(created.id)).toBeNull();
+
+      // A string replaces it.
+      const replaced = db.updateJournalEntry(created.id, {
+        snapshotImage: image,
+      });
+      expect(replaced?.hasSnapshot).toBe(true);
+
+      expect(() =>
+        db.addJournalEntry({
+          symbol: "NABIL",
+          side: "buy",
+          snapshotImage: "data:image/gif;base64,AAAA",
+        }),
+      ).toThrow(/snapshotImage/);
+
+      const oversized = `data:image/png;base64,${"A".repeat(2_097_288)}`;
+      expect(() =>
+        db.addJournalEntry({
+          symbol: "NABIL",
+          side: "buy",
+          snapshotImage: oversized,
+        }),
+      ).toThrow(/1\.5 MB/);
+    } finally {
+      db.close();
+    }
+  });
+
   it("imports reconciliation rows idempotently by external id", () => {
     const db = store();
     try {

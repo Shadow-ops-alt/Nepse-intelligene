@@ -119,13 +119,14 @@ There is no TLS server in this change.
 
 - Plain LAN HTTP is fine for layout and functional testing, but no service
   worker, no offline shell and no install prompt without a secure context.
-- The mobile product is the free PWA. There is no separate mobile binary.
+- The mobile product is the free PWA. A thin Android APK wrapper is also
+  available; see [ANDROID_APK.md](./ANDROID_APK.md).
 - The service worker is registered only in production builds, so the Vite dev
   server never registers one.
-- This does not produce an Android APK. A native APK needs the Android SDK,
-  a Gradle project (for example Capacitor or a Trusted Web Activity wrapper)
-  and signing. That work is not part of this change; the phone experience here
-  is the installable web app plus LAN testing.
+- The Android APK is a thin WebView client. It loads the LAN-served PWA, so the
+  PC must run the API with `NEPSE_LAN=1` and both devices must be on the same
+  network. It is debug-signed for testing, not for the Play Store. See
+  [ANDROID_APK.md](./ANDROID_APK.md).
 - Alerts do not run in the background on a phone. They are evaluated only while
   the PWA or browser tab is open, as described in `docs/ALERTS.md`.
 - The API remains single-user and unauthenticated by design. Do not expose it

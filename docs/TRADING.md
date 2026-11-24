@@ -64,6 +64,28 @@ Record both paper and real trades.
 - Writes use `POST /api/journal`, `PATCH /api/journal/:id` and
   `DELETE /api/journal/:id`.
 
+### Chart snapshots
+
+A company chart can be attached to a journal entry without leaving the app.
+
+- On a company page, the **Snap** button in the chart toolbar captures the
+  rendered candles and the drawing overlay as one image. The capture is
+  downscaled to at most 1280 px wide and exported as JPEG at quality 0.82.
+- The image is handed to the journal through `sessionStorage`, never uploaded
+  to a third party. The journal page reads the pending image once, prefills the
+  symbol, shows a preview with a **Remove** button, and clears the storage key.
+- Saving sends the data URL as `snapshotImage` with `POST /api/journal` or
+  `PATCH /api/journal/:id`. Omitting the field keeps an existing image, sending
+  `null` removes it, and a data URL replaces it.
+- Images are stored in the local SQLite database. The API accepts PNG, JPEG or
+  WebP base64 data URLs up to 1.5 MB decoded; anything larger or malformed is
+  rejected. Journal list responses expose only `hasSnapshot`, never the image.
+- `GET /api/journal/:id/snapshot` returns the raw bytes with the correct image
+  content type and `cache-control: no-store`. The journal table shows a small
+  lazy thumbnail that opens the full image in a new tab.
+- The snapshot is a picture of the chart and its drawings. It is not investment
+  advice, a recommendation or a forecast.
+
 ## Reconciliation
 
 Bring broker or CDSC history together with the local ledger.
@@ -131,6 +153,7 @@ All payloads are camelCase JSON.
 | POST | `/api/journal` | entry | `{ entry }` |
 | PATCH | `/api/journal/:id` | entry | `{ entry }` |
 | DELETE | `/api/journal/:id` | — | `{ deleted }` |
+| GET | `/api/journal/:id/snapshot` | — | raw image bytes (`image/png`, `image/jpeg` or `image/webp`) |
 | POST | `/api/reconciliation/import` | `{ source, csv }` | `{ imported, skipped, importId }` |
 | GET | `/api/reconciliation/summary` | — | summary object |
 | GET | `/api/corporate-ledger?symbol=` | — | `{ entries }` |

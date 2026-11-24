@@ -135,6 +135,8 @@ export interface JournalEntry {
   mistakes: string | null;
   tags: string[];
   snapshot: unknown;
+  /** True when a chart image is attached; the image itself is never returned. */
+  hasSnapshot: boolean;
   openedAt: string;
   closedAt: string | null;
   createdAt: string;
@@ -158,6 +160,11 @@ export interface JournalInput {
   mistakes?: string | null;
   tags?: string[];
   snapshot?: unknown;
+  /**
+   * Chart image as a base64 data URL. `undefined` keeps an existing image on
+   * update, `null` removes it and a string replaces it.
+   */
+  snapshotImage?: string | null;
   openedAt?: string | null;
   closedAt?: string | null;
 }
@@ -342,6 +349,46 @@ function computeJournalPnl(
       ? (actualExit - actualEntry) * quantity
       : (actualEntry - actualExit) * quantity;
   return roundValue(gross - fees, 2);
+}
+
+/** A chart snapshot: PNG, JPEG or WebP, base64, at most 1.5 MB decoded. */
+const JOURNAL_SNAPSHOT_PATTERN =
+  /^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/=]+)$/;
+const JOURNAL_SNAPSHOT_MAX_BYTES = 1.5 * 1024 * 1024;
+
+/**
+ * Explicit journal columns. `snapshot_image` is deliberately excluded: lists
+ * and single-entry reads expose only `has_snapshot`, so a large image never
+ * travels with ordinary journal JSON.
+ */
+const JOURNAL_COLUMNS = `id, plan_id, symbol, side, paper, planned_entry,
+  planned_stop, planned_target, actual_entry, actual_exit, quantity, fees, pnl,
+  reason, mistakes, tags, snapshot, opened_at, closed_at, created_at,
+  updated_at, (snapshot_image IS NOT NULL AND snapshot_image <> '') AS has_snapshot`;
+
+/**
+ * Returns the data URL unchanged when valid, or null when the image is
+ * absent. Throws with a user-facing message when the value is malformed or too
+ * large. The base64 payload is decoded only to measure it.
+ */
+export function validateJournalSnapshotImage(
+  value: unknown,
+): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    throw new Error("snapshotImage must be a data URL string or null");
+  }
+  const match = JOURNAL_SNAPSHOT_PATTERN.exec(value);
+  if (!match) {
+    throw new Error(
+      "snapshotImage must be a base64 data URL of type image/png, image/jpeg or image/webp",
+    );
+  }
+  const decoded = Buffer.from(match[2] ?? "", "base64");
+  if (decoded.length > JOURNAL_SNAPSHOT_MAX_BYTES) {
+    throw new Error("snapshotImage is larger than 1.5 MB after decoding");
+  }
+  return value;
 }
 
 interface NormalizedJournal {
@@ -857,6 +904,21 @@ export class PersonalStore {
       `);
 
       this.recordMigration(5);
+    }
+
+    if (!applied.has(6)) {
+      // Chart snapshots live beside the journal row. Existing rows keep a
+      // NULL image; nothing is rewritten or backfilled.
+      const journalColumns = new Set(
+        this.db
+          .prepare("PRAGMA table_info(trade_journal)")
+          .all()
+          .map((row) => String(row.name)),
+      );
+      if (!journalColumns.has("snapshot_image")) {
+        this.db.exec("ALTER TABLE trade_journal ADD COLUMN snapshot_image TEXT");
+      }
+      this.recordMigration(6);
     }
   }
 
@@ -1702,6 +1764,7 @@ export class PersonalStore {
       mistakes: row.mistakes === null ? null : String(row.mistakes),
       tags,
       snapshot,
+      hasSnapshot: Number(row.has_snapshot) === 1,
       openedAt: String(row.opened_at),
       closedAt: row.closed_at === null ? null : String(row.closed_at),
       createdAt: String(row.created_at),
@@ -1734,15 +1797,16 @@ export class PersonalStore {
 
   addJournalEntry(input: JournalInput): JournalEntry {
     const entry = normalizeJournal(input);
+    const snapshotImage = validateJournalSnapshotImage(input.snapshotImage);
     const now = new Date().toISOString();
     const result = this.db
       .prepare(
         `INSERT INTO trade_journal (
            plan_id, symbol, side, paper, planned_entry, planned_stop,
            planned_target, actual_entry, actual_exit, quantity, fees, pnl,
-           reason, mistakes, tags, snapshot, opened_at, closed_at,
-           created_at, updated_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           reason, mistakes, tags, snapshot, snapshot_image, opened_at,
+           closed_at, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         entry.planId,
@@ -1761,6 +1825,7 @@ export class PersonalStore {
         entry.mistakes,
         JSON.stringify(entry.tags),
         entry.snapshot,
+        snapshotImage,
         entry.openedAt,
         entry.closedAt,
         now,
@@ -1771,7 +1836,7 @@ export class PersonalStore {
 
   getJournalEntry(id: number): JournalEntry | null {
     const row = this.db
-      .prepare(`SELECT * FROM trade_journal WHERE id = ?`)
+      .prepare(`SELECT ${JOURNAL_COLUMNS} FROM trade_journal WHERE id = ?`)
       .get(id);
     return row ? this.journalFromRow(row) : null;
   }
@@ -1802,11 +1867,51 @@ export class PersonalStore {
     const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
     return this.db
       .prepare(
-        `SELECT * FROM trade_journal ${where}
+        `SELECT ${JOURNAL_COLUMNS} FROM trade_journal ${where}
          ORDER BY opened_at DESC, id DESC`,
       )
       .all(...params)
       .map((row) => this.journalFromRow(row));
+  }
+
+  /**
+   * Returns the raw snapshot bytes and MIME type, or null when the entry has no
+   * image. The data URL is decoded here so callers never parse it.
+   */
+  getJournalSnapshot(id: number): { mime: string; data: Buffer } | null {
+    const row = this.db
+      .prepare("SELECT snapshot_image FROM trade_journal WHERE id = ?")
+      .get(id);
+    if (
+      !row ||
+      row.snapshot_image === null ||
+      row.snapshot_image === undefined
+    ) {
+      return null;
+    }
+    const value = String(row.snapshot_image);
+    const match = /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/.exec(
+      value,
+    );
+    if (!match) return null;
+    return {
+      mime: match[1]!,
+      data: Buffer.from(match[2]!, "base64"),
+    };
+  }
+
+  private journalSnapshotImage(id: number): string | null {
+    const row = this.db
+      .prepare("SELECT snapshot_image FROM trade_journal WHERE id = ?")
+      .get(id);
+    if (
+      !row ||
+      row.snapshot_image === null ||
+      row.snapshot_image === undefined
+    ) {
+      return null;
+    }
+    return String(row.snapshot_image);
   }
 
   updateJournalEntry(id: number, patch: JournalPatch): JournalEntry | null {
@@ -1830,6 +1935,13 @@ export class PersonalStore {
     } else if (!Object.prototype.hasOwnProperty.call(patch, "pnl")) {
       delete merged.pnl;
     }
+    // `undefined` (or an absent key) keeps the stored image; null removes it.
+    const snapshotImage = Object.prototype.hasOwnProperty.call(
+      patch,
+      "snapshotImage",
+    ) && patch.snapshotImage !== undefined
+      ? validateJournalSnapshotImage(patch.snapshotImage)
+      : this.journalSnapshotImage(id);
     const entry = normalizeJournal(merged);
     const updatedAt = new Date().toISOString();
     this.db
@@ -1838,8 +1950,8 @@ export class PersonalStore {
            plan_id = ?, symbol = ?, side = ?, paper = ?, planned_entry = ?,
            planned_stop = ?, planned_target = ?, actual_entry = ?,
            actual_exit = ?, quantity = ?, fees = ?, pnl = ?, reason = ?,
-           mistakes = ?, tags = ?, snapshot = ?, opened_at = ?,
-           closed_at = ?, updated_at = ?
+           mistakes = ?, tags = ?, snapshot = ?, snapshot_image = ?,
+           opened_at = ?, closed_at = ?, updated_at = ?
          WHERE id = ?`,
       )
       .run(
@@ -1859,6 +1971,7 @@ export class PersonalStore {
         entry.mistakes,
         JSON.stringify(entry.tags),
         entry.snapshot,
+        snapshotImage,
         entry.openedAt,
         entry.closedAt,
         updatedAt,

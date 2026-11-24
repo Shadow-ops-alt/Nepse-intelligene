@@ -153,6 +153,22 @@ export function CompanyPage({
     }
   }
 
+  /**
+   * Hand the chart image to the journal through sessionStorage. Nothing is
+   * uploaded; the journal page reads and clears this key on mount.
+   */
+  function snapToJournal(image: string) {
+    try {
+      window.sessionStorage.setItem(
+        "nepse.journal.pendingSnapshot",
+        JSON.stringify({ symbol, image, capturedAt: new Date().toISOString() }),
+      );
+    } catch {
+      // Storage can be unavailable; still take the user to the journal.
+    }
+    window.location.hash = "#/journal";
+  }
+
   if (candlesState.loading) return <Spinner label={`Loading ${symbol}`} />;
 
   if (candlesState.error) {
@@ -369,6 +385,7 @@ export function CompanyPage({
                   defaultAnalysis={COMPANY_ANALYSIS}
                   markers={markers}
                   drawingKey={`equity:${symbol}`}
+                  onSnapshot={snapToJournal}
                 />
               ) : (
                 <LiveIntradayChart symbol={symbol} timeframe={timeframe} height="tall" />

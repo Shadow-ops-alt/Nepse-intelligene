@@ -74,6 +74,23 @@ async function jsonFetch(
   };
 }
 
+interface RawResult {
+  status: number;
+  contentType: string | null;
+  cacheControl: string | null;
+  bytes: Uint8Array;
+}
+
+async function rawFetch(base: string, path: string): Promise<RawResult> {
+  const response = await fetch(`${base}${path}`);
+  return {
+    status: response.status,
+    contentType: response.headers.get("content-type"),
+    cacheControl: response.headers.get("cache-control"),
+    bytes: new Uint8Array(await response.arrayBuffer()),
+  };
+}
+
 afterEach(() => {
   while (directories.length > 0) {
     rmSync(directories.pop()!, { recursive: true, force: true });
@@ -391,6 +408,102 @@ describe("personal endpoints", () => {
 
       const summaryAfter = await jsonFetch(base, "/api/reconciliation/summary");
       expect((summaryAfter.body.imports as unknown[]).length).toBe(2);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it("stores journal chart snapshots and serves the raw image", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "stock-journal-snapshot-"));
+    directories.push(directory);
+    const dbPath = join(directory, "personal.db");
+    const dataDir = join(directory, "data");
+    mkdirSync(dataDir, { recursive: true });
+    const seed = new PersonalStore(dbPath);
+    seed.close();
+
+    const { server } = createApiServer({
+      dbPath,
+      dataDir,
+      env: {
+        NODE_ENV: "development",
+        PERSONAL_DATA_DIR: dataDir,
+      },
+    });
+    await new Promise<void>((resolve) =>
+      server.listen(0, "127.0.0.1", resolve),
+    );
+    const { port } = server.address() as AddressInfo;
+    const base = `http://127.0.0.1:${port}`;
+
+    try {
+      const png =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+      const image = `data:image/png;base64,${png}`;
+
+      const created = await jsonFetch(base, "/api/journal", {
+        method: "POST",
+        body: { symbol: "NABIL", side: "buy", snapshotImage: image },
+      });
+      expect(created.status).toBe(201);
+      const entry = created.body.entry as Record<string, unknown>;
+      expect(entry.hasSnapshot).toBe(true);
+      expect(entry).not.toHaveProperty("snapshotImage");
+      const id = Number(entry.id);
+
+      const listed = await jsonFetch(base, "/api/journal?symbol=NABIL");
+      const rows = listed.body.entries as Array<Record<string, unknown>>;
+      expect(rows).toHaveLength(1);
+      expect(rows[0]?.hasSnapshot).toBe(true);
+      expect(rows[0]).not.toHaveProperty("snapshotImage");
+
+      const raw = await rawFetch(base, `/api/journal/${String(id)}/snapshot`);
+      expect(raw.status).toBe(200);
+      expect(raw.contentType).toBe("image/png");
+      expect(raw.cacheControl).toBe("no-store");
+      expect(Buffer.from(raw.bytes).toString("base64")).toBe(png);
+
+      // Omitting the field keeps the image.
+      const kept = await jsonFetch(base, `/api/journal/${String(id)}`, {
+        method: "PATCH",
+        body: { reason: "kept" },
+      });
+      expect(
+        (kept.body.entry as Record<string, unknown>).hasSnapshot,
+      ).toBe(true);
+
+      // null removes it and the snapshot route then returns 404.
+      const cleared = await jsonFetch(base, `/api/journal/${String(id)}`, {
+        method: "PATCH",
+        body: { snapshotImage: null },
+      });
+      expect(
+        (cleared.body.entry as Record<string, unknown>).hasSnapshot,
+      ).toBe(false);
+      const gone = await rawFetch(
+        base,
+        `/api/journal/${String(id)}/snapshot`,
+      );
+      expect(gone.status).toBe(404);
+
+      const invalid = await jsonFetch(base, "/api/journal", {
+        method: "POST",
+        body: {
+          symbol: "NABIL",
+          side: "buy",
+          snapshotImage: "data:image/gif;base64,AAAA",
+        },
+      });
+      expect(invalid.status).toBe(400);
+      expect(String(invalid.body.error)).toMatch(/snapshotImage/);
+
+      const oversized = `data:image/png;base64,${"A".repeat(2_097_288)}`;
+      const tooBig = await jsonFetch(base, "/api/journal", {
+        method: "POST",
+        body: { symbol: "NABIL", side: "buy", snapshotImage: oversized },
+      });
+      expect(tooBig.status).toBe(400);
+      expect(String(tooBig.body.error)).toMatch(/1\.5 MB/);
     } finally {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }

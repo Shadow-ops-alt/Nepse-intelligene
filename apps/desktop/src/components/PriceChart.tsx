@@ -292,6 +292,7 @@ export function PriceChart({
   showVolume = true,
   markers = EMPTY_MARKERS,
   drawingKey = null,
+  onSnapshot,
 }: {
   candles: Candle[];
   variant?: "candles" | "area";
@@ -307,8 +308,11 @@ export function PriceChart({
   markers?: ChartMarker[];
   /** Enables the drawing toolbar; drawings are stored per key (e.g. symbol). */
   drawingKey?: string | null;
+  /** Enables the "Snap" toolbar button and receives a JPEG data URL. */
+  onSnapshot?: (dataUrl: string) => void;
 }) {
   const container = useRef<HTMLDivElement>(null);
+  const stage = useRef<HTMLDivElement>(null);
   const [handles, setHandles] = useState<{
     chart: IChartApi;
     price: ISeriesApi<SeriesType>;
@@ -943,6 +947,40 @@ export function PriceChart({
 
   const drawingEnabled = drawingKey !== null && variant === "candles";
 
+  /**
+   * Capture the rendered chart plus the drawing overlay as a JPEG. The chart
+   * itself is transparent, so the theme surface is painted first; without it a
+   * dark theme would export as black. The overlay canvas is a sibling of the
+   * chart inside `.chart-stage` and uses the same CSS box.
+   */
+  const captureSnapshot = useCallback(() => {
+    if (!onSnapshot || !handles || !stage.current) return;
+    const stageElement = stage.current;
+    const source = handles.chart.takeScreenshot();
+    if (source.width === 0 || source.height === 0) return;
+    const scale = Math.min(1, 1280 / source.width);
+    const width = Math.max(1, Math.round(source.width * scale));
+    const height = Math.max(1, Math.round(source.height * scale));
+    const output = document.createElement("canvas");
+    output.width = width;
+    output.height = height;
+    const context = output.getContext("2d");
+    if (!context) return;
+    const surface = getComputedStyle(stageElement)
+      .getPropertyValue("--surface")
+      .trim();
+    context.fillStyle = surface || "#ffffff";
+    context.fillRect(0, 0, width, height);
+    context.drawImage(source, 0, 0, width, height);
+    const overlay = stageElement.querySelector<HTMLCanvasElement>(
+      "canvas.drawing-layer",
+    );
+    if (overlay && overlay.width > 0 && overlay.height > 0) {
+      context.drawImage(overlay, 0, 0, width, height);
+    }
+    onSnapshot(output.toDataURL("image/jpeg", 0.82));
+  }, [handles, onSnapshot]);
+
   return (
     <div className="chart-shell">
       <div className="chart-toolbar">
@@ -994,6 +1032,17 @@ export function PriceChart({
                   onClick={() => setShowPatternZones((value) => !value)}
                 >
                   Pattern zones
+                </button>
+              )}
+              {onSnapshot && (
+                <button
+                  type="button"
+                  className="toggle-chip"
+                  title="Save this chart to the trade journal"
+                  disabled={!handles}
+                  onClick={captureSnapshot}
+                >
+                  Snap
                 </button>
               )}
             </>
@@ -1260,6 +1309,7 @@ export function PriceChart({
       )}
 
       <div
+        ref={stage}
         className={`chart-stage ${
           size === "compact" ? "compact" : size === "tall" ? "tall" : ""
         }`}

@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api, formatNumber } from "../api";
 import { useApi } from "../hooks";
 import type {
@@ -119,6 +119,15 @@ interface Draft {
   closedAt: string;
 }
 
+/** Written by the company page when the user clicks "Snap". */
+const PENDING_SNAPSHOT_KEY = "nepse.journal.pendingSnapshot";
+
+interface PendingSnapshot {
+  symbol?: string;
+  image?: string;
+  capturedAt?: string;
+}
+
 function emptyDraft(): Draft {
   return {
     planId: "",
@@ -174,6 +183,52 @@ export function JournalPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [snapshotImage, setSnapshotImage] = useState<string | null>(null);
+  const [existingSnapshotId, setExistingSnapshotId] = useState<number | null>(
+    null,
+  );
+  const [snapshotRemoved, setSnapshotRemoved] = useState(false);
+
+  const snapshotPreview =
+    snapshotImage ??
+    (existingSnapshotId === null
+      ? null
+      : `/api/journal/${existingSnapshotId}/snapshot`);
+
+  // A chart "Snap" navigates here with the image in sessionStorage. Read it
+  // once, clear the key, and prefill the form.
+  useEffect(() => {
+    let raw: string | null = null;
+    try {
+      raw = window.sessionStorage.getItem(PENDING_SNAPSHOT_KEY);
+    } catch {
+      raw = null;
+    }
+    if (!raw) return;
+    try {
+      window.sessionStorage.removeItem(PENDING_SNAPSHOT_KEY);
+    } catch {
+      // Ignore storage failures; the form still works without the image.
+    }
+    try {
+      const pending = JSON.parse(raw) as PendingSnapshot;
+      if (
+        typeof pending.image !== "string" ||
+        !pending.image.startsWith("data:image/")
+      ) {
+        return;
+      }
+      setSnapshotImage(pending.image);
+      setExistingSnapshotId(null);
+      setSnapshotRemoved(false);
+      if (typeof pending.symbol === "string" && pending.symbol.trim()) {
+        const symbol = pending.symbol.trim().toUpperCase();
+        setDraft((current) => ({ ...current, symbol }));
+      }
+    } catch {
+      // Ignore malformed pending data.
+    }
+  }, []);
 
   const update = (patch: Partial<Draft>) =>
     setDraft((current) => ({ ...current, ...patch }));
@@ -255,6 +310,15 @@ export function JournalPage() {
     setDraft(emptyDraft());
     setEditingId(null);
     setError(null);
+    setSnapshotImage(null);
+    setExistingSnapshotId(null);
+    setSnapshotRemoved(false);
+  }
+
+  function removeSnapshot() {
+    setSnapshotImage(null);
+    setExistingSnapshotId(null);
+    setSnapshotRemoved(true);
   }
 
   function applyPlan(id: string) {
@@ -283,6 +347,9 @@ export function JournalPage() {
   function loadEntry(entry: JournalEntry) {
     setEditingId(entry.id);
     setError(null);
+    setSnapshotImage(null);
+    setExistingSnapshotId(entry.hasSnapshot ? entry.id : null);
+    setSnapshotRemoved(false);
     setDraft({
       planId: entry.planId === null ? "" : String(entry.planId),
       symbol: entry.symbol,
@@ -327,7 +394,7 @@ export function JournalPage() {
         .split(",")
         .map((tag) => tag.trim())
         .filter(Boolean);
-      const body = {
+      const body: Record<string, unknown> = {
         planId: draft.planId ? Number(draft.planId) : null,
         symbol,
         side: draft.side,
@@ -346,6 +413,13 @@ export function JournalPage() {
         openedAt: draft.openedAt || null,
         closedAt: draft.closedAt || null,
       };
+      // Omit the field to keep an existing image; null removes it; a data URL
+      // replaces it. New entries simply include it when attached.
+      if (snapshotImage) {
+        body.snapshotImage = snapshotImage;
+      } else if (editingId !== null && snapshotRemoved) {
+        body.snapshotImage = null;
+      }
       if (editingId === null) {
         await api("/api/journal", {
           method: "POST",
@@ -574,6 +648,28 @@ export function JournalPage() {
                 onChange={(event) => update({ snapshot: event.target.value })}
               />
             </label>
+            <div className="field-group span-full">
+              <span>Chart snapshot</span>
+              {snapshotPreview ? (
+                <div className="snapshot-preview">
+                  <img
+                    src={snapshotPreview}
+                    alt={`Chart snapshot for ${draft.symbol || "this entry"}`}
+                  />
+                  <button
+                    type="button"
+                    className="button button-ghost button-small"
+                    onClick={removeSnapshot}
+                  >
+                    Remove
+                  </button>
+                </div>
+              ) : (
+                <p className="muted small snapshot-empty">
+                  Open a company chart and click Snap to attach it here.
+                </p>
+              )}
+            </div>
           </div>
 
           <MiniStats
@@ -752,6 +848,7 @@ export function JournalPage() {
                   <th className="right">Actual</th>
                   <th className="right">P&L</th>
                   <th className="right">R</th>
+                  <th>Chart</th>
                   <th>Tags</th>
                   <th />
                 </tr>
@@ -819,6 +916,28 @@ export function JournalPage() {
                         }`}
                       >
                         {r === null || isPending ? "—" : `${formatNumber(r)}R`}
+                      </td>
+                      <td className="snapshot-cell">
+                        {entry.hasSnapshot ? (
+                          <a
+                            className="journal-thumb-link"
+                            href={`/api/journal/${entry.id}/snapshot`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title="Open the chart snapshot full size"
+                          >
+                            <img
+                              className="journal-thumb"
+                              src={`/api/journal/${entry.id}/snapshot`}
+                              alt={`Chart snapshot for ${entry.symbol}`}
+                              loading="lazy"
+                              width={64}
+                              height={40}
+                            />
+                          </a>
+                        ) : (
+                          <span className="muted small">—</span>
+                        )}
                       </td>
                       <td>
                         <span className="row" style={{ gap: 4 }}>

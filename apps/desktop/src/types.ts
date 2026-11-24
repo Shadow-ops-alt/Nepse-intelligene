@@ -699,6 +699,8 @@ export interface JournalEntry {
   tags: string[];
   /** Stored as JSON by the API; usually a string, so the form stringifies it. */
   snapshot: unknown;
+  /** True when a chart image is attached; fetch it from the snapshot route. */
+  hasSnapshot?: boolean;
   openedAt: string | null;
   closedAt: string | null;
   createdAt: string;

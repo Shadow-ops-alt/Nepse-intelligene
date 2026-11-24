@@ -92,6 +92,12 @@ function sendJson(
   response.end(payload);
 }
 
+/**
+ * Journal bodies can carry a chart snapshot: 1.5 MB of image becomes about
+ * 2 MB of base64, so this route needs more room than the 64 KB default.
+ */
+const JOURNAL_BODY_LIMIT = 3 * 1024 * 1024;
+
 function readBody(
   request: IncomingMessage,
   maxBytes = 64 * 1024,
@@ -627,9 +633,23 @@ function journalInputFromBody(body: Record<string, unknown>): JournalInput {
       ? body.tags.map((tag) => String(tag))
       : (body.tags as string[] | undefined),
     snapshot: body.snapshot,
+    snapshotImage: journalSnapshotFromBody(body),
     openedAt: bodyText(body.openedAt),
     closedAt: bodyText(body.closedAt),
   };
+}
+
+/** `undefined` when absent, `null` when explicitly null, else the data URL. */
+function journalSnapshotFromBody(
+  body: Record<string, unknown>,
+): string | null | undefined {
+  if (!("snapshotImage" in body)) return undefined;
+  const value = body.snapshotImage;
+  if (value === null) return null;
+  if (typeof value !== "string") {
+    throw new Error("snapshotImage must be a data URL string or null");
+  }
+  return value;
 }
 
 function journalPatchFromBody(body: Record<string, unknown>): JournalPatch {
@@ -668,6 +688,9 @@ function journalPatchFromBody(body: Record<string, unknown>): JournalPatch {
       : (body.tags as string[]);
   }
   if ("snapshot" in body) patch.snapshot = body.snapshot;
+  if ("snapshotImage" in body) {
+    patch.snapshotImage = journalSnapshotFromBody(body) ?? null;
+  }
   if ("openedAt" in body) patch.openedAt = bodyText(body.openedAt);
   if ("closedAt" in body) patch.closedAt = bodyText(body.closedAt);
   return patch;
@@ -2431,6 +2454,30 @@ export function createApiServer(config: ApiConfig): ApiHandle {
         }
 
         // --- trade journal ----------------------------------------------
+        const journalSnapshotMatch = /^\/api\/journal\/(\d+)\/snapshot$/.exec(
+          url.pathname,
+        );
+        if (journalSnapshotMatch) {
+          if (request.method !== "GET") {
+            sendJson(response, 405, { error: "method not allowed" });
+            return;
+          }
+          const snapshot = store.getJournalSnapshot(
+            Number(journalSnapshotMatch[1]),
+          );
+          if (!snapshot) {
+            sendJson(response, 404, { error: "not found" });
+            return;
+          }
+          response.writeHead(200, {
+            "content-type": snapshot.mime,
+            "cache-control": "no-store",
+            "content-length": snapshot.data.length,
+          });
+          response.end(snapshot.data);
+          return;
+        }
+
         const journalMatch = /^\/api\/journal(?:\/(\d+))?$/.exec(url.pathname);
         if (journalMatch) {
           const idText = journalMatch[1];
@@ -2449,7 +2496,7 @@ export function createApiServer(config: ApiConfig): ApiHandle {
               return;
             }
             if (request.method === "POST") {
-              const body = await readBody(request);
+              const body = await readBody(request, JOURNAL_BODY_LIMIT);
               try {
                 const entry = store.addJournalEntry(
                   journalInputFromBody(body),
@@ -2463,7 +2510,7 @@ export function createApiServer(config: ApiConfig): ApiHandle {
           } else {
             const id = Number(idText);
             if (request.method === "PATCH") {
-              const body = await readBody(request);
+              const body = await readBody(request, JOURNAL_BODY_LIMIT);
               try {
                 const entry = store.updateJournalEntry(
                   id,

@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Android 15 (API 35) forces edge-to-edge for apps targeting 35. Keep the
+         system bars outside the WebView so the app content is not drawn under
+         the status bar or notch. -->
+    <style name="AppTheme" parent="AppThemeBase">
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+</resources>

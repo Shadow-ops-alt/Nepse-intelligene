@@ -7,6 +7,8 @@ reports/
 *.log
 apps/desktop/electron/server.mjs
 apps/desktop/electron/nepse.wasm
+apps/mobile/build/
+apps/mobile/debug.keystore
 .env
 .env.*
 !.env.example
