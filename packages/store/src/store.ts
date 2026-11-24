@@ -798,11 +798,16 @@ export class PersonalStore {
       this.recordMigration(4);
     }
 
-    if (!applied.has(5)) {
-      // Trade plans, the trade journal, the corporate-action ledger and
-      // reconciliation metadata. Portfolio columns are added only when the
-      // table predates them (a fresh database creates them in one pass below).
-      this.db.exec(`
+    // Trade plans, the trade journal, the corporate-action ledger and
+    // reconciliation metadata. Portfolio columns are added only when the
+    // table predates them (a fresh database creates them in one pass below).
+    //
+    // This DDL and the column ensures below run on every startup instead of
+    // being gated on the version row: a database can carry schema_migrations
+    // version 5 without these tables (an adopted or partially migrated file),
+    // and gating the repair left migration 6 to ALTER a missing table and die
+    // with "no such table: trade_journal". Every statement here is idempotent.
+    this.db.exec(`
         CREATE TABLE IF NOT EXISTS trade_plans (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
           symbol TEXT NOT NULL,
@@ -903,21 +908,24 @@ export class PersonalStore {
           WHERE external_id IS NOT NULL;
       `);
 
+    if (!applied.has(5)) {
       this.recordMigration(5);
     }
 
+    // Chart snapshots live beside the journal row. Existing rows keep a NULL
+    // image; nothing is rewritten or backfilled. The ensure is unconditional
+    // so a repaired journal table also gains the column when version 6 is
+    // already recorded.
+    const journalColumns = new Set(
+      this.db
+        .prepare("PRAGMA table_info(trade_journal)")
+        .all()
+        .map((row) => String(row.name)),
+    );
+    if (!journalColumns.has("snapshot_image")) {
+      this.db.exec("ALTER TABLE trade_journal ADD COLUMN snapshot_image TEXT");
+    }
     if (!applied.has(6)) {
-      // Chart snapshots live beside the journal row. Existing rows keep a
-      // NULL image; nothing is rewritten or backfilled.
-      const journalColumns = new Set(
-        this.db
-          .prepare("PRAGMA table_info(trade_journal)")
-          .all()
-          .map((row) => String(row.name)),
-      );
-      if (!journalColumns.has("snapshot_image")) {
-        this.db.exec("ALTER TABLE trade_journal ADD COLUMN snapshot_image TEXT");
-      }
       this.recordMigration(6);
     }
   }

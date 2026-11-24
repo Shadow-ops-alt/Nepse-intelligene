@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   createMeta,
   type Candle,
@@ -701,6 +702,51 @@ describe("PersonalStore", () => {
       expect(db.getCorporateLedger("NABIL")).toHaveLength(1);
     } finally {
       db.close();
+    }
+  });
+
+  it("repairs a database that records version 5 without the trading tables", () => {
+    const dir = mkdtempSync(join(tmpdir(), "store-migrate-"));
+    const dbPath = join(dir, "personal.db");
+    try {
+      const first = new PersonalStore(dbPath);
+      first.close();
+
+      // The field failure: the bookkeeping row says version 5 is applied, but
+      // the trading tables were never created (adopted or partially migrated
+      // file). Migration 6 used to ALTER the missing journal and crash.
+      const raw = new DatabaseSync(dbPath);
+      raw.exec("DROP TABLE IF EXISTS trade_journal");
+      raw.exec("DROP TABLE IF EXISTS trade_plans");
+      raw.exec("DELETE FROM schema_migrations WHERE version >= 5");
+      raw
+        .prepare("INSERT INTO schema_migrations (version, applied_at) VALUES (5, ?)")
+        .run(new Date().toISOString());
+      raw.close();
+
+      const repaired = new PersonalStore(dbPath);
+      expect(repaired.getSchemaVersion()).toBe(6);
+      // Reads snapshot_image, so it throws if the column is absent.
+      expect(repaired.getJournalSnapshot(1)).toBeNull();
+      repaired.close();
+
+      const check = new DatabaseSync(dbPath);
+      const tables = check
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('trade_plans','trade_journal','corporate_ledger','reconciliation_imports')",
+        )
+        .all()
+        .map((row) => String(row.name))
+        .sort();
+      check.close();
+      expect(tables).toEqual([
+        "corporate_ledger",
+        "reconciliation_imports",
+        "trade_journal",
+        "trade_plans",
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
     }
   });
 });
