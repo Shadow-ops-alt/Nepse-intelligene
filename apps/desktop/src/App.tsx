@@ -37,6 +37,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { AlertsPage } from "./pages/AlertsPage";
 import { LivePage } from "./pages/LivePage";
 import { CalculatorPage } from "./pages/CalculatorPage";
+import { BacktestPage } from "./pages/BacktestPage";
 import { SectorsPage } from "./pages/SectorsPage";
 import { FundamentalsPage } from "./pages/FundamentalsPage";
 import { FloorsheetPage } from "./pages/FloorsheetPage";
@@ -174,6 +175,14 @@ const PERSONAL: NavItem[] = [
     title: "Share calculator",
     crumb: "Buy/sell cost, CGT, breakeven, WACC, bonus/right and dividend yield",
     icon: Icon.Sigma,
+    key: "",
+  },
+  {
+    path: "/backtest",
+    label: "Backtest",
+    title: "Backtest",
+    crumb: "Corporate-action-gated strategy simulation over the stored archive",
+    icon: Icon.Candles,
     key: "",
   },
   {
@@ -440,6 +449,8 @@ export function App() {
     content = <EventsPage onOpenSymbol={openSymbol} />;
   } else if (page === "calculator") {
     content = <CalculatorPage />;
+  } else if (page === "backtest") {
+    content = <BacktestPage />;
   } else if (page === "trade-plan") {
     content = <TradePlanPage />;
   } else if (page === "journal") {

@@ -1,0 +1,151 @@
+{
+  "generatedAt": "2026-11-24T12:30:40.343Z",
+  "apk": "/home/xenos/Public/nepse-intelligene/apps/mobile/release/NEPSE-Terminal-0.5.0-standalone.apk",
+  "results": [
+    {
+      "name": "install APK",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "app loads a loopback URL",
+      "ok": true,
+      "detail": "http://127.0.0.1:34619/"
+    },
+    {
+      "name": "local server uses an ephemeral port",
+      "ok": true,
+      "detail": "http://127.0.0.1:34619/"
+    },
+    {
+      "name": "PC API is not referenced",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Live market nav is hidden",
+      "ok": true,
+      "detail": "Market, Signals & alerts, Screener, Fundamentals, Sectors, Floorsheet & brokers, IPO, events & news, Companies, Watchlist, Portfolio, Calculator, Trade plan, Journal, Reconciliation, Data quality, Data, Settings"
+    },
+    {
+      "name": "Backtest nav is hidden",
+      "ok": true,
+      "detail": "Market, Signals & alerts, Screener, Fundamentals, Sectors, Floorsheet & brokers, IPO, events & news, Companies, Watchlist, Portfolio, Calculator, Trade plan, Journal, Reconciliation, Data quality, Data, Settings"
+    },
+    {
+      "name": "all resources are same-origin",
+      "ok": true,
+      "detail": "[\"http://127.0.0.1:34619\"]"
+    },
+    {
+      "name": "market overview renders pack data",
+      "ok": true,
+      "detail": "46286 chars"
+    },
+    {
+      "name": "Live market route redirects to Market",
+      "ok": true,
+      "detail": "#/market"
+    },
+    {
+      "name": "Backtest route redirects to Market",
+      "ok": true,
+      "detail": "#/market"
+    },
+    {
+      "name": "backtest API is explicitly unavailable",
+      "ok": true,
+      "detail": "{\"status\":503,\"body\":{\"error\":\"Not available in the offline mobile app\"}}"
+    },
+    {
+      "name": "company chart page loads from pack",
+      "ok": true,
+      "detail": "4144 chars"
+    },
+    {
+      "name": "intraday timeframes are hidden (only 1D)",
+      "ok": true,
+      "detail": "[\"1D\"]"
+    },
+    {
+      "name": "price chart canvas is present",
+      "ok": true,
+      "detail": "12 canvases"
+    },
+    {
+      "name": "watchlist add through the UI persists",
+      "ok": true,
+      "detail": "{\"symbols\":[\"NABIL\"]}"
+    },
+    {
+      "name": "trade plan create returns 201",
+      "ok": true,
+      "detail": "{\"plan\":{\"symbol\":\"NABIL\",\"side\":\"buy\",\"entry\":500,\"stop\":480,\"targets\":[550,570,600],\"quantity\":100,\"riskAmount\":2000,\"riskPercent\":4,\"rewardRisk\":2.5,\"fees\":50,\"notes\":\"standalone emulator test\",\"id\":1,\"createdAt\":\"2026-11-24T12:30:25.933231Z\",\"updatedAt\":\"2026-11-24T12:30:25.933231Z\"}}"
+    },
+    {
+      "name": "trade plan is persisted with derived risk",
+      "ok": true,
+      "detail": "{\"symbol\":\"NABIL\",\"side\":\"buy\",\"entry\":500,\"stop\":480,\"targets\":[550,570,600],\"quantity\":100,\"riskAmount\":2000,\"riskPercent\":4,\"rewardRisk\":2.5,\"fees\":50,\"notes\":\"standalone emulator test\",\"id\":1,\"createdAt\":\"2026-11-24T12:30:25.933231Z\",\"updatedAt\":\"2026-11-24T12:30:25.933231Z\"}"
+    },
+    {
+      "name": "trade plan edit updates the stop",
+      "ok": true,
+      "detail": "{\"symbol\":\"NABIL\",\"side\":\"buy\",\"entry\":500,\"stop\":485,\"targets\":[550,570,600],\"quantity\":100,\"riskAmount\":1500,\"riskPercent\":3,\"rewardRisk\":3.3333,\"fees\":50,\"notes\":\"standalone emulator test\",\"id\":1,\"createdAt\":\"2026-11-24T12:30:25.933231Z\",\"updatedAt\":\"2026-11-24T12:30:25.941161Z\"}"
+    },
+    {
+      "name": "trade plan renders in the UI",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "journal create returns 201 with computed P&L",
+      "ok": true,
+      "detail": "{\"entry\":{\"planId\":null,\"symbol\":\"NABIL\",\"side\":\"buy\",\"paper\":false,\"plannedEntry\":null,\"plannedStop\":null,\"plannedTarget\":null,\"actualEntry\":500,\"actualExit\":540,\"quantity\":10,\"fees\":10,\"pnl\":390,\"reason\":\"standalone emulator journal\",\"tags\":[],\"snapshot\":null,\"hasSnapshot\":false,\"openedAt\":\"2026-11-20\",\"closedAt\":\"2026-11-21\",\"id\":1,\"createdAt\":\"2026-11-24T12:30:26.188430Z\",\"updatedAt\":\"2026-11-24T12:30:26.188430Z\"}}"
+    },
+    {
+      "name": "journal entry renders in the UI",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "data quality page loads from pack",
+      "ok": true,
+      "detail": "17308 chars"
+    },
+    {
+      "name": "Data page shows the data pack notice",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "Data page hides update/import controls",
+      "ok": true,
+      "detail": "[\"Data pack\",\"Provider\",\"Dataset availability\",\"Updating the archive\",\"What the free edition cannot do\"]"
+    },
+    {
+      "name": "watchlist survives a cold restart",
+      "ok": true,
+      "detail": "{\"symbols\":[\"NABIL\"]}"
+    },
+    {
+      "name": "trade plan survives a cold restart",
+      "ok": true,
+      "detail": "{\"symbol\":\"NABIL\",\"side\":\"buy\",\"entry\":500,\"stop\":485,\"targets\":[550,570,600],\"quantity\":100,\"riskAmount\":1500,\"riskPercent\":3,\"rewardRisk\":3.3333,\"fees\":50,\"notes\":\"standalone emulator test\",\"id\":1,\"createdAt\":\"2026-11-24T12:30:25.933231Z\",\"updatedAt\":\"2026-11-24T12:30:25.941161Z\"}"
+    },
+    {
+      "name": "journal entry survives a cold restart",
+      "ok": true,
+      "detail": "{\"entries\":[{\"planId\":null,\"symbol\":\"NABIL\",\"side\":\"buy\",\"paper\":false,\"plannedEntry\":null,\"plannedStop\":null,\"plannedTarget\":null,\"actualEntry\":500,\"actualExit\":540,\"quantity\":10,\"fees\":10,\"pnl\":390,\"reason\":\"standalone emulator journal\",\"tags\":[],\"snapshot\":null,\"hasSnapshot\":false,\"openedAt\":\"2026-11-20\",\"closedAt\":\"2026-11-21\",\"id\":1,\"createdAt\":\"2026-11-24T12:30:26.188430Z\",\"updatedAt\":\"2026-11-24T12:30:26.188430Z\"}]}"
+    },
+    {
+      "name": "market overview works in airplane mode",
+      "ok": true,
+      "detail": "46286 chars"
+    },
+    {
+      "name": "company candles load in airplane mode",
+      "ok": true,
+      "detail": "{\"status\":200,\"candles\":1149}"
+    }
+  ]
+}

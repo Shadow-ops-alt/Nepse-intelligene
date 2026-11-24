@@ -23,11 +23,16 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="NEPSE-Terminal"
-VERSION_NAME="0.4.0"
+VERSION_NAME="0.5.0"
+VERSION_CODE=500
 MIN_SDK=26
 TARGET_SDK=35
 BUILD_TOOLS_VERSION="${BUILD_TOOLS_VERSION:-35.0.0}"
 PLATFORM="${PLATFORM:-android-35}"
+DESKTOP_DIST="$ROOT/../../apps/desktop/dist"
+ASSETS="$ROOT/assets"
+WEB_ASSETS="$ASSETS/web"
+PACK_ASSETS="$ASSETS/pack"
 
 # ---------------------------------------------------------------- JDK ------
 if [ -z "${JAVA_HOME:-}" ] || [ ! -x "$JAVA_HOME/bin/javac" ]; then
@@ -82,7 +87,7 @@ fi
 # -------------------------------------------------------------- paths ------
 BUILD="$ROOT/build"
 DIST="$ROOT/release"
-APK_NAME="${APP_NAME}-${VERSION_NAME}-android.apk"
+APK_NAME="${APP_NAME}-${VERSION_NAME}-standalone.apk"
 OUT_APK="$DIST/$APK_NAME"
 KEYSTORE="$ROOT/debug.keystore"
 KEY_ALIAS="androiddebugkey"
@@ -90,6 +95,30 @@ KEY_PASS="android"
 
 rm -rf "$BUILD"
 mkdir -p "$BUILD/gen" "$BUILD/classes" "$BUILD/dex" "$DIST"
+
+# The standalone app serves the web build and the data pack from APK assets.
+if [ ! -f "$DESKTOP_DIST/index.html" ]; then
+    echo "ERROR: $DESKTOP_DIST/index.html is missing." >&2
+    echo "Build the web app first: npx --yes pnpm@12.16.1 build:web" >&2
+    exit 1
+fi
+if [ ! -f "$PACK_ASSETS/manifest.json" ]; then
+    echo "ERROR: $PACK_ASSETS/manifest.json is missing." >&2
+    echo "Generate the data pack first:" >&2
+    echo "  npx --yes tsx scripts/mobile-pack/generate.ts --api-url http://127.0.0.1:4310" >&2
+    exit 1
+fi
+if [ ! -f "$ASSETS/mobile/mobile.js" ] || [ ! -f "$ASSETS/mobile/mobile.css" ]; then
+    echo "ERROR: the mobile shell assets are missing from $ASSETS/mobile." >&2
+    exit 1
+fi
+
+echo "==> stage web assets"
+rm -rf "$WEB_ASSETS"
+mkdir -p "$WEB_ASSETS"
+cp -a "$DESKTOP_DIST/." "$WEB_ASSETS/"
+echo "    web:  $(du -sh "$WEB_ASSETS" | cut -f1)"
+echo "    pack: $(du -sh "$PACK_ASSETS" | cut -f1)"
 
 echo "==> Toolchain"
 echo "    java:     $(javac -version 2>&1)"
@@ -109,9 +138,10 @@ echo "==> aapt2 link"
     -I "$ANDROID_JAR" \
     --manifest "$ROOT/AndroidManifest.xml" \
     --java "$BUILD/gen" \
+    -A "$ASSETS" \
     --min-sdk-version "$MIN_SDK" \
     --target-sdk-version "$TARGET_SDK" \
-    --version-code 400 \
+    --version-code "$VERSION_CODE" \
     --version-name "$VERSION_NAME" \
     --replace-version \
     "$BUILD/resources.zip"

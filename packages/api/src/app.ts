@@ -33,12 +33,23 @@ import {
   type TradePlanPatch,
 } from "@stock/store";
 import {
+  adjustCandles,
   analyzeCandles,
   computePortfolio,
+  normalizeExDate,
+  normalizeStrategy,
+  resolveCorporateActions,
+  runBacktest,
   screenCandles,
   xirr,
+  type BacktestConfig,
+  type FeeSchedule,
+  type InvestorType,
+  type PositionSizing,
+  type ResolvedCorporateAction,
   type ScreenerRow,
   type SignalEvent,
+  type StrategyConfig,
   type TradeInput,
 } from "@stock/analytics";
 import { syncPersonalData } from "@stock/personal";
@@ -757,6 +768,332 @@ function roundTo(value: number, digits = 2): number {
  * NPT day, not the UTC day, or a dividend is excluded for the 5h45m after NPT
  * midnight.
  */
+// ---------------------------------------------------------------------------
+// backtesting coverage and request parsing
+// ---------------------------------------------------------------------------
+
+/** A symbol covered by the backtest gate, with every blocking reason spelled out. */
+export interface BacktestCoverageAction {
+  type: string;
+  fiscalYear: string | null;
+  exDate: string | null;
+  /** `book-closure` marks a derived, approximate ex-date. */
+  dateBasis: "explicit" | "book-closure" | null;
+  status: "resolved" | "unresolved";
+  reason: string | null;
+  cashPerShare: number | null;
+  ratio: number | null;
+  issuePrice: number | null;
+  sourceUrl: string | null;
+}
+
+export interface BacktestCoverageSymbol {
+  symbol: string;
+  eligible: boolean;
+  reasons: string[];
+  bars: number;
+  firstBar: string | null;
+  lastBar: string | null;
+  actionsStored: number;
+  resolvedActions: number;
+  unresolvedActions: number;
+  bookClosureDates: number;
+  explicitDates: number;
+  hasActionSnapshot: boolean;
+  adjustedSeriesValid: boolean;
+  actions: BacktestCoverageAction[];
+}
+
+export interface BacktestCoverage {
+  providerId: string;
+  generatedAt: string;
+  from: string | null;
+  to: string | null;
+  symbols: BacktestCoverageSymbol[];
+  summary: {
+    requested: number;
+    eligible: number;
+    ineligible: number;
+    resolvedActions: number;
+    unresolvedActions: number;
+    /** Resolved actions whose ex-date is a derived book-closure date. */
+    bookClosureDates: number;
+    /** Resolved actions whose ex-date is explicit in the stored data. */
+    explicitDates: number;
+    symbolsWithStoredActions: number;
+    symbolsWithoutStoredActions: number;
+    sessions: number;
+    seriesValidated: number;
+    allEligible: boolean;
+  };
+}
+
+const MAX_COVERAGE_SYMBOLS = 50;
+const MAX_BACKTEST_SYMBOLS = 25;
+const MAX_BACKTEST_BARS_PER_SYMBOL = 8000;
+const MAX_BACKTEST_BARS = 100_000;
+
+/**
+ * Resolve every symbol's corporate actions and validate its adjusted series.
+ * A symbol is eligible only when a corporate-action snapshot is stored, every
+ * action in it is resolved to an ex-date, and the adjusted series validates.
+ * A missing snapshot is unknown coverage, not proof that no action exists.
+ */
+function computeBacktestCoverage(
+  store: PersonalStore,
+  providerId: string,
+  symbols: readonly string[],
+  from: string | null,
+  to: string | null,
+): BacktestCoverage {
+  const companies = new Map(
+    store.getCompanies(providerId).map((company) => [
+      company.symbol.toUpperCase(),
+      company,
+    ]),
+  );
+  const rows = symbols.map((symbol): BacktestCoverageSymbol => {
+    const snapshot = store.getSnapshotWithProvenance<unknown[]>(
+      providerId,
+      "corporateActions",
+      symbol,
+    );
+    const usableSnapshot = snapshot !== undefined && Array.isArray(snapshot.data);
+    const resolution = resolveCorporateActions(
+      usableSnapshot ? snapshot.data : null,
+      {
+        symbol,
+        ...(companies.get(symbol)?.paidUpValue !== undefined
+          ? { parValue: companies.get(symbol)!.paidUpValue }
+          : {}),
+      },
+    );
+    const candles = store
+      .getCandleSeries(providerId, symbol)
+      .candles.filter((candle) => {
+        const day = candle.timestamp.slice(0, 10);
+        return (!from || day >= from) && (!to || day <= to);
+      });
+    const reasons: string[] = [];
+    if (!snapshot) {
+      reasons.push(
+        "no corporate-action snapshot is stored for this symbol; the series cannot be confirmed action-free",
+      );
+    } else if (!usableSnapshot) {
+      reasons.push("the stored corporate-action snapshot is not a list of actions");
+    }
+    for (const action of resolution.unresolved.slice(0, 12)) {
+      reasons.push(
+        `${action.rawType || "action"} ${action.fiscalYear ?? ""}: ${action.reason}`.trim(),
+      );
+    }
+    if (resolution.unresolved.length > 12) {
+      reasons.push(
+        `and ${resolution.unresolved.length - 12} more unresolved actions`,
+      );
+    }
+    let adjustedSeriesValid = false;
+    if (candles.length < 2) {
+      reasons.push(
+        `fewer than two stored sessions in the requested range (${candles.length})`,
+      );
+    } else {
+      const adjusted = adjustCandles(candles, resolution.resolved, {
+        mode: "price",
+        symbol,
+      });
+      adjustedSeriesValid = adjusted.validation.ok;
+      for (const issue of adjusted.validation.issues.slice(0, 12)) {
+        reasons.push(`adjusted series: ${issue}`);
+      }
+    }
+    const first = candles[0];
+    const last = candles.at(-1);
+    const bookClosureDates = resolution.resolved.filter(
+      (action) => action.dateBasis === "book-closure",
+    ).length;
+    if (bookClosureDates > 0) {
+      reasons.push(
+        `${bookClosureDates} action${bookClosureDates === 1 ? "" : "s"} use book-closure dates as approximate ex-dates (not exchange-published); results may shift by one session`,
+      );
+    }
+    const actionViews: BacktestCoverageAction[] = [
+      ...resolution.resolved.map((action) => ({
+        type: action.type,
+        fiscalYear: action.fiscalYear ?? null,
+        exDate: action.exDate,
+        dateBasis: action.dateBasis ?? "explicit",
+        status: "resolved" as const,
+        reason: null,
+        cashPerShare: action.dividendPerShare ?? null,
+        ratio:
+          action.ratio ??
+          action.splitRatio ??
+          action.bonusPercent ??
+          action.percent ??
+          null,
+        issuePrice: action.issuePrice ?? null,
+        sourceUrl: action.sourceUrl ?? null,
+      })),
+      ...resolution.unresolved.map((action) => ({
+        type: action.rawType || "unknown",
+        fiscalYear: action.fiscalYear ?? null,
+        exDate: null,
+        dateBasis: null,
+        status: "unresolved" as const,
+        reason: action.reason,
+        cashPerShare: null,
+        ratio: null,
+        issuePrice: null,
+        sourceUrl: action.sourceUrl ?? null,
+      })),
+    ];
+    return {
+      symbol,
+      eligible:
+        usableSnapshot &&
+        resolution.unresolved.length === 0 &&
+        candles.length >= 2 &&
+        adjustedSeriesValid,
+      reasons,
+      bars: candles.length,
+      firstBar: first ? first.timestamp.slice(0, 10) : null,
+      lastBar: last ? last.timestamp.slice(0, 10) : null,
+      actionsStored: usableSnapshot ? snapshot.data.length : 0,
+      resolvedActions: resolution.resolved.length,
+      unresolvedActions: resolution.unresolved.length,
+      bookClosureDates,
+      explicitDates: resolution.resolved.length - bookClosureDates,
+      hasActionSnapshot: snapshot !== undefined,
+      adjustedSeriesValid,
+      actions: actionViews,
+    };
+  });
+
+  const eligible = rows.filter((row) => row.eligible);
+  return {
+    providerId,
+    generatedAt: new Date().toISOString(),
+    from,
+    to,
+    symbols: rows,
+    summary: {
+      requested: rows.length,
+      eligible: eligible.length,
+      ineligible: rows.length - eligible.length,
+      resolvedActions: rows.reduce((sum, row) => sum + row.resolvedActions, 0),
+      unresolvedActions: rows.reduce((sum, row) => sum + row.unresolvedActions, 0),
+      bookClosureDates: rows.reduce((sum, row) => sum + row.bookClosureDates, 0),
+      explicitDates: rows.reduce((sum, row) => sum + row.explicitDates, 0),
+      symbolsWithStoredActions: rows.filter((row) => row.hasActionSnapshot).length,
+      symbolsWithoutStoredActions: rows.filter((row) => !row.hasActionSnapshot).length,
+      sessions: rows.reduce((sum, row) => sum + row.bars, 0),
+      seriesValidated: rows.filter((row) => row.adjustedSeriesValid).length,
+      allEligible: rows.length > 0 && rows.every((row) => row.eligible),
+    },
+  };
+}
+
+function parseBacktestSymbols(value: unknown, max: number): string[] {
+  const raw = Array.isArray(value)
+    ? value
+    : typeof value === "string"
+      ? value.split(",")
+      : [];
+  const symbols = [
+    ...new Set(
+      raw
+        .map((entry) => String(entry).trim().toUpperCase())
+        .filter((entry) => entry.length > 0),
+    ),
+  ];
+  if (symbols.length === 0) {
+    throw new RangeError("at least one symbol is required");
+  }
+  if (symbols.length > max) {
+    throw new RangeError(`at most ${max} symbols are allowed`);
+  }
+  return symbols;
+}
+
+function strategyFromBody(value: unknown): StrategyConfig {
+  const source =
+    typeof value === "string"
+      ? { kind: value }
+      : value && typeof value === "object"
+        ? (value as Record<string, unknown>)
+        : null;
+  if (!source) throw new RangeError("strategy is required");
+  const strategy = { kind: String(source.kind ?? "") } as StrategyConfig;
+  const numericKeys = [
+    "fastPeriod",
+    "slowPeriod",
+    "rsiPeriod",
+    "rsiBuyBelow",
+    "rsiSellAbove",
+    "macdFast",
+    "macdSlow",
+    "macdSignal",
+    "breakoutEntryLookback",
+    "breakoutExitLookback",
+  ] as const;
+  const writable = strategy as unknown as Record<string, number>;
+  for (const key of numericKeys) {
+    const raw = source[key];
+    if (raw !== undefined && raw !== null && raw !== "") {
+      writable[key] = Number(raw);
+    }
+  }
+  normalizeStrategy(strategy);
+  return strategy;
+}
+
+function costsFromBody(
+  body: Record<string, unknown>,
+): {
+  schedule?: Partial<FeeSchedule>;
+  investor: InvestorType;
+  slippageBps: number;
+  dividendTaxPercent?: number;
+} {
+  const costs =
+    body.costs && typeof body.costs === "object"
+      ? (body.costs as Record<string, unknown>)
+      : {};
+  const schedule =
+    costs.schedule && typeof costs.schedule === "object"
+      ? (costs.schedule as Partial<FeeSchedule>)
+      : undefined;
+  const investor: InvestorType =
+    costs.investor === "institution" ? "institution" : "individual";
+  const rawSlippage =
+    body.slippageBps !== undefined ? body.slippageBps : costs.slippageBps;
+  const slippageBps =
+    rawSlippage === undefined || rawSlippage === null || rawSlippage === ""
+      ? 0
+      : Number(rawSlippage);
+  if (!Number.isFinite(slippageBps) || slippageBps < 0 || slippageBps > 1000) {
+    throw new RangeError("slippageBps must be between 0 and 1000");
+  }
+  const rawDividendTax = costs.dividendTaxPercent;
+  const dividendTaxPercent =
+    rawDividendTax === undefined || rawDividendTax === null || rawDividendTax === ""
+      ? undefined
+      : Number(rawDividendTax);
+  if (
+    dividendTaxPercent !== undefined &&
+    (!Number.isFinite(dividendTaxPercent) || dividendTaxPercent < 0)
+  ) {
+    throw new RangeError("dividendTaxPercent must be zero or greater");
+  }
+  return {
+    ...(schedule ? { schedule } : {}),
+    investor,
+    slippageBps,
+    ...(dividendTaxPercent !== undefined ? { dividendTaxPercent } : {}),
+  };
+}
+
 function nptDate(now = new Date()): string {
   return new Date(now.getTime() + (5 * 60 + 45) * 60_000)
     .toISOString()
@@ -853,6 +1190,30 @@ export function createApiServer(config: ApiConfig): ApiHandle {
     { dataVersion: number; generation: number; key: string }
   >();
   let screenerGeneration = 0;
+
+  // Backtest coverage reads every symbol's corporate-action snapshot and runs
+  // the adjustment validator. It is keyed by the store's data version so a
+  // re-sync or a manual import invalidates it automatically.
+  const backtestCoverageCache = new Map<string, BacktestCoverage>();
+  const backtestCoverage = (
+    symbols: readonly string[],
+    from: string | null,
+    to: string | null,
+  ): BacktestCoverage => {
+    const key = [
+      providerId,
+      store.dataVersion(),
+      from ?? "",
+      to ?? "",
+      [...symbols].sort().join(","),
+    ].join("|");
+    const cached = backtestCoverageCache.get(key);
+    if (cached) return cached;
+    const computed = computeBacktestCoverage(store, providerId, symbols, from, to);
+    if (backtestCoverageCache.size >= 32) backtestCoverageCache.clear();
+    backtestCoverageCache.set(key, computed);
+    return computed;
+  };
 
   const screenerKey = (namespace: string): string => {
     const dataVersion = store.dataVersion();
@@ -1226,6 +1587,239 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             datasets,
             store: summary,
           });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/backtest/coverage"
+        ) {
+          let symbols: string[];
+          try {
+            symbols = parseBacktestSymbols(
+              url.searchParams.get("symbols"),
+              MAX_COVERAGE_SYMBOLS,
+            );
+          } catch (error) {
+            sendJson(response, 400, { error: errorText(error) });
+            return;
+          }
+          const fromText = url.searchParams.get("from");
+          const toText = url.searchParams.get("to");
+          const from = fromText ? normalizeExDate(fromText) : null;
+          const to = toText ? normalizeExDate(toText) : null;
+          if (fromText && !from) {
+            sendJson(response, 400, { error: "from must be a YYYY-MM-DD date" });
+            return;
+          }
+          if (toText && !to) {
+            sendJson(response, 400, { error: "to must be a YYYY-MM-DD date" });
+            return;
+          }
+          if (from && to && from > to) {
+            sendJson(response, 400, { error: "from must not be after to" });
+            return;
+          }
+          const coverage = backtestCoverage(symbols, from, to);
+          sendJson(response, 200, {
+            ...coverage,
+            generatedAt: new Date().toISOString(),
+          });
+          return;
+        }
+
+        if (
+          request.method === "POST" &&
+          url.pathname === "/api/backtest/run"
+        ) {
+          const body = await readBody(request);
+          try {
+            const symbols = parseBacktestSymbols(
+              body.symbols,
+              MAX_BACKTEST_SYMBOLS,
+            );
+            const fromText = bodyText(body.from);
+            const toText = bodyText(body.to);
+            const from = fromText ? normalizeExDate(fromText) : null;
+            const to = toText ? normalizeExDate(toText) : null;
+            if (fromText && !from) {
+              throw new RangeError("from must be a YYYY-MM-DD date");
+            }
+            if (toText && !to) {
+              throw new RangeError("to must be a YYYY-MM-DD date");
+            }
+            if (from && to && from > to) {
+              throw new RangeError("from must not be after to");
+            }
+            const strategy = strategyFromBody(body.strategy);
+            const capital = bodyNumber(body.capital);
+            if (!Number.isFinite(capital) || capital <= 0) {
+              throw new RangeError("capital must be greater than zero");
+            }
+            let positionSizing: PositionSizing;
+            if (
+              body.positionAmount !== undefined &&
+              body.positionAmount !== null &&
+              body.positionAmount !== ""
+            ) {
+              const amount = bodyNumber(body.positionAmount);
+              if (!Number.isFinite(amount) || amount <= 0) {
+                throw new RangeError("positionAmount must be greater than zero");
+              }
+              positionSizing = { mode: "fixed", amount };
+            } else {
+              const percent =
+                body.positionPercent === undefined ||
+                body.positionPercent === null ||
+                body.positionPercent === ""
+                  ? 20
+                  : bodyNumber(body.positionPercent);
+              if (!Number.isFinite(percent) || percent <= 0 || percent > 100) {
+                throw new RangeError(
+                  "positionPercent must be greater than 0 and at most 100",
+                );
+              }
+              positionSizing = { mode: "percent", percent };
+            }
+            const maxPositions =
+              body.maxPositions === undefined ||
+              body.maxPositions === null ||
+              body.maxPositions === ""
+                ? 5
+                : bodyNumber(body.maxPositions);
+            if (
+              !Number.isInteger(maxPositions) ||
+              maxPositions < 1 ||
+              maxPositions > 50
+            ) {
+              throw new RangeError(
+                "maxPositions must be an integer between 1 and 50",
+              );
+            }
+            const costs = costsFromBody(body);
+            const stopLossPercent = bodyOptionalNumber(body.stopLossPercent);
+            if (
+              stopLossPercent !== undefined &&
+              stopLossPercent !== null &&
+              (!Number.isFinite(stopLossPercent) ||
+                stopLossPercent <= 0 ||
+                stopLossPercent >= 100)
+            ) {
+              throw new RangeError(
+                "stopLossPercent must be greater than 0 and below 100",
+              );
+            }
+            const takeProfitPercent = bodyOptionalNumber(body.takeProfitPercent);
+            if (
+              takeProfitPercent !== undefined &&
+              takeProfitPercent !== null &&
+              (!Number.isFinite(takeProfitPercent) || takeProfitPercent <= 0)
+            ) {
+              throw new RangeError(
+                "takeProfitPercent must be greater than zero",
+              );
+            }
+
+            const coverage = backtestCoverage(symbols, from, to);
+            if (!coverage.summary.allEligible) {
+              const blocked = coverage.symbols
+                .filter((row) => !row.eligible)
+                .map((row) => row.symbol);
+              sendJson(response, 400, {
+                error: `backtest gate refused: ${blocked.join(", ")} has unresolved or missing corporate-action coverage`,
+                coverage,
+              });
+              return;
+            }
+
+            const companies = new Map(
+              store.getCompanies(providerId).map((company) => [
+                company.symbol.toUpperCase(),
+                company,
+              ]),
+            );
+            const seriesInputs: Array<{
+              symbol: string;
+              candles: Candle[];
+              actions: ResolvedCorporateAction[];
+            }> = [];
+            let totalBars = 0;
+            for (const symbol of symbols) {
+              const candles = store.getCandleSeries(providerId, symbol).candles;
+              const inRange = candles.filter((candle) => {
+                const day = candle.timestamp.slice(0, 10);
+                return (!from || day >= from) && (!to || day <= to);
+              });
+              if (inRange.length > MAX_BACKTEST_BARS_PER_SYMBOL) {
+                throw new RangeError(
+                  `${symbol}: ${inRange.length} sessions exceed the per-symbol limit of ${MAX_BACKTEST_BARS_PER_SYMBOL}; narrow the date range`,
+                );
+              }
+              totalBars += inRange.length;
+              const snapshot = store.getSnapshotWithProvenance<unknown[]>(
+                providerId,
+                "corporateActions",
+                symbol,
+              );
+              const company = companies.get(symbol);
+              const resolution = resolveCorporateActions(
+                snapshot && Array.isArray(snapshot.data) ? snapshot.data : null,
+                {
+                  symbol,
+                  ...(company?.paidUpValue !== undefined
+                    ? { parValue: company.paidUpValue }
+                    : {}),
+                },
+              );
+              if (resolution.unresolved.length > 0) {
+                throw new RangeError(
+                  `${symbol}: corporate-action coverage is incomplete: ${resolution.unresolved[0]?.reason ?? "unresolved action"}`,
+                );
+              }
+              seriesInputs.push({
+                symbol,
+                candles,
+                actions: resolution.resolved,
+              });
+            }
+            if (totalBars > MAX_BACKTEST_BARS) {
+              throw new RangeError(
+                `${totalBars} sessions exceed the total limit of ${MAX_BACKTEST_BARS}; narrow the range or use fewer symbols`,
+              );
+            }
+
+            const benchmarkSymbol = (
+              bodyText(body.benchmarkSymbol) ?? "NEPSE"
+            ).toUpperCase();
+            const benchmarkCandles = store.getCandleSeries(
+              providerId,
+              benchmarkSymbol,
+              "index",
+            ).candles;
+            const config: BacktestConfig = {
+              strategy,
+              initialCapital: capital,
+              positionSizing,
+              maxPositions,
+              ...(from ? { from } : {}),
+              ...(to ? { to } : {}),
+              costs,
+              ...(stopLossPercent !== undefined && stopLossPercent !== null
+                ? { stopLossPercent }
+                : {}),
+              ...(takeProfitPercent !== undefined && takeProfitPercent !== null
+                ? { takeProfitPercent }
+                : {}),
+              benchmark:
+                benchmarkCandles.length >= 2
+                  ? { symbol: benchmarkSymbol, candles: benchmarkCandles }
+                  : null,
+            };
+            const result = runBacktest({ symbols: seriesInputs, config });
+            sendJson(response, 200, { result });
+          } catch (error) {
+            sendJson(response, 400, { error: errorText(error) });
+          }
           return;
         }
 

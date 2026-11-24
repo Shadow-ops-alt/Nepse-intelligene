@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DEVELOPMENT_POLICY } from "@stock/core";
 import { createPersonalFreeProvider } from "@stock/providers";
 import { PersonalStore } from "@stock/store";
-import { syncPersonalData } from "./sync";
+import { mergeCorporateActions, syncPersonalData } from "./sync";
 
 const directories: string[] = [];
 
@@ -205,5 +205,47 @@ describe("syncPersonalData", () => {
     } finally {
       store.close();
     }
+  });
+});
+
+describe("corporate action merge", () => {
+  it("keeps derived ex-dates and enriched rows when a raw import is re-synced", () => {
+    const existing = [
+      {
+        symbol: "NABIL",
+        type: "cashDividend",
+        value: 9.75,
+        ratio: "9.75%",
+        notes: "FY 081-082; ex-date derived from ShareSansar book closure 2025-01-05",
+        exDate: "2025-01-05",
+        dateBasis: "book-closure",
+        dividendPerShare: 9.75,
+      },
+      {
+        symbol: "NABIL",
+        type: "bonus",
+        value: 10,
+        fiscalYear: "080-081",
+        exDate: "2024-01-05",
+        dateBasis: "book-closure",
+      },
+    ];
+    const incoming = [
+      {
+        symbol: "NABIL",
+        type: "cashDividend",
+        value: 9.75,
+        ratio: "9.75%",
+        notes: "FY 081-082; percentage of paid-up value (unofficial)",
+      },
+    ];
+    const merged = mergeCorporateActions(existing, incoming);
+    expect(merged).toHaveLength(2);
+    expect(merged[0]).toMatchObject({
+      exDate: "2025-01-05",
+      dateBasis: "book-closure",
+      dividendPerShare: 9.75,
+    });
+    expect(merged[1]).toMatchObject({ type: "bonus", exDate: "2024-01-05" });
   });
 });

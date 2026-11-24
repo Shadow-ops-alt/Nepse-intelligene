@@ -65,6 +65,79 @@ function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * A fresh corporate-actions import carries the raw public rows, which do not
+ * have ex-dates. An enrichment pass may already have written a derived
+ * `exDate`/`dateBasis` and extra bonus/right rows. Merge the import into the
+ * stored snapshot instead of overwriting it, keeping those derived fields and
+ * any enriched rows the source does not carry.
+ */
+function corporateActionMergeKey(action: Record<string, unknown>): string {
+  const symbol = String(action.symbol ?? "").toUpperCase();
+  const type = String(action.type ?? "").toLowerCase().replace(/[^a-z]/g, "");
+  const notes = String(action.notes ?? "");
+  const year = String(
+    action.fiscalYear ?? notes.match(/FY\s*(\d{3}\s*[-/]\s*\d{3})/i)?.[1] ?? "",
+  ).replace(/\s+/g, "");
+  const numeric = Number(action.value ?? action.percent ?? action.ratio);
+  return `${symbol}|${type}|${year}|${Number.isFinite(numeric) ? numeric : ""}`;
+}
+
+export function mergeCorporateActions<T extends object>(
+  existing: readonly unknown[] | undefined,
+  incoming: readonly T[],
+): T[] {
+  if (!Array.isArray(existing) || existing.length === 0) return [...incoming];
+  const previousByKey = new Map<string, Record<string, unknown>>();
+  for (const entry of existing) {
+    if (entry && typeof entry === "object") {
+      previousByKey.set(
+        corporateActionMergeKey(entry as Record<string, unknown>),
+        entry as Record<string, unknown>,
+      );
+    }
+  }
+  const seen = new Set<string>();
+  const merged: Record<string, unknown>[] = [];
+  for (const entry of incoming) {
+    if (!entry || typeof entry !== "object") continue;
+    const next = entry as Record<string, unknown>;
+    const key = corporateActionMergeKey(next);
+    const previous = previousByKey.get(key);
+    seen.add(key);
+    if (!previous) {
+      merged.push({ ...next });
+      continue;
+    }
+    const combined: Record<string, unknown> = { ...previous, ...next };
+    for (const field of [
+      "exDate",
+      "dateBasis",
+      "bookClosureDate",
+      "dividendPerShare",
+      "paidUpValue",
+      "matchSource",
+      "matchSourceUrl",
+    ]) {
+      if (next[field] === undefined && previous[field] !== undefined) {
+        combined[field] = previous[field];
+      }
+    }
+    if (
+      typeof previous.notes === "string" &&
+      previous.notes.includes("ex-date derived") &&
+      !String(next.notes ?? "").includes("ex-date derived")
+    ) {
+      combined.notes = previous.notes;
+    }
+    merged.push(combined);
+  }
+  for (const [key, previous] of previousByKey) {
+    if (!seen.has(key)) merged.push(previous);
+  }
+  return merged as unknown as T[];
+}
+
 function rethrowIfFatal(error: unknown): void {
   if (error instanceof DataValidationError) throw error;
   if (
@@ -419,7 +492,15 @@ export async function syncPersonalData(
           snapshotRows += 2;
         }
         for (const entry of corporateActionEnvelopes) {
-          store.upsertSnapshot("corporateActions", entry.symbol, entry.envelope);
+          const stored = store.getSnapshotWithProvenance<unknown[]>(
+            providerId,
+            "corporateActions",
+            entry.symbol,
+          );
+          store.upsertSnapshot("corporateActions", entry.symbol, {
+            ...entry.envelope,
+            data: mergeCorporateActions(stored?.data, entry.envelope.data),
+          });
           snapshotRows += 1;
         }
         if (iposEnvelope && iposEnvelope.data.length > 0) {

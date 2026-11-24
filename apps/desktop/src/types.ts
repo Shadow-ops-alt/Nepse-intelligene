@@ -799,3 +799,179 @@ export interface DataQualityResponse {
   summary: DataQualitySummary;
   symbols: DataQualitySymbol[];
 }
+
+// ---------------------------------------------------------------------------
+// backtesting
+// ---------------------------------------------------------------------------
+
+export type BacktestStrategyKind =
+  | "smaCross"
+  | "emaCross"
+  | "rsi"
+  | "macd"
+  | "breakout"
+  | "buyAndHold";
+
+export interface BacktestCoverageAction {
+  type: string;
+  fiscalYear: string | null;
+  exDate: string | null;
+  /** `book-closure` dates are derived approximations, not exchange ex-dates. */
+  dateBasis?: "explicit" | "book-closure" | null;
+  status: "resolved" | "unresolved";
+  reason: string | null;
+  cashPerShare: number | null;
+  ratio: number | null;
+  issuePrice: number | null;
+  sourceUrl: string | null;
+}
+
+export interface BacktestCoverageSymbol {
+  symbol: string;
+  eligible: boolean;
+  reasons: string[];
+  bars: number;
+  firstBar: string | null;
+  lastBar: string | null;
+  actionsStored: number;
+  resolvedActions: number;
+  unresolvedActions: number;
+  hasActionSnapshot: boolean;
+  adjustedSeriesValid: boolean;
+  actions: BacktestCoverageAction[];
+}
+
+export interface BacktestCoverageResponse {
+  providerId: string;
+  generatedAt: string;
+  from: string | null;
+  to: string | null;
+  symbols: BacktestCoverageSymbol[];
+  summary: {
+    requested: number;
+    eligible: number;
+    ineligible: number;
+    resolvedActions: number;
+    unresolvedActions: number;
+    symbolsWithStoredActions: number;
+    symbolsWithoutStoredActions: number;
+    sessions: number;
+    seriesValidated: number;
+    allEligible: boolean;
+  };
+}
+
+export interface BacktestTrade {
+  symbol: string;
+  entryDate: string;
+  entryPrice: number;
+  exitDate: string;
+  exitPrice: number;
+  quantity: number;
+  buyCostTotal: number;
+  sellProceeds: number;
+  netProfit: number;
+  returnPercent: number;
+  holdingDays: number;
+  exitReason: "signal" | "stop" | "target" | "end-of-test";
+  fees: number;
+  cgt: number;
+  dividends: number;
+}
+
+export interface BacktestEquityPoint {
+  date: string;
+  equity: number;
+  invested: number;
+  cash: number;
+  benchmark: number | null;
+}
+
+export interface BacktestDrawdownPoint {
+  date: string;
+  drawdownPercent: number;
+}
+
+export interface BacktestMonthlyReturn {
+  month: string;
+  returnPercent: number;
+}
+
+export interface BacktestMetrics {
+  initialCapital: number;
+  finalEquity: number;
+  totalReturnPercent: number;
+  cagrPercent: number | null;
+  maxDrawdownPercent: number;
+  sharpe: number | null;
+  sortino: number | null;
+  volatilityPercent: number | null;
+  winRatePercent: number | null;
+  profitFactor: number | null;
+  expectancy: number | null;
+  trades: number;
+  winningTrades: number;
+  losingTrades: number;
+  exposurePercent: number;
+  turnoverPercent: number;
+  benchmarkReturnPercent: number | null;
+  sessions: number;
+  sessionsPerYear: number;
+  totalFees: number;
+  totalCgt: number;
+  totalDividends: number;
+  totalTurnover: number;
+}
+
+export interface BacktestAdjustmentSummary {
+  symbol: string;
+  actions: number;
+  applied: number;
+  invalid: number;
+  outsideRange: number;
+  cashEvents: number;
+  validationOk: boolean;
+  warnings: string[];
+}
+
+export interface BacktestResult {
+  generatedAt: string;
+  classification: "DERIVED";
+  symbols: string[];
+  strategy: {
+    kind: BacktestStrategyKind;
+    fastPeriod?: number;
+    slowPeriod?: number;
+    rsiPeriod?: number;
+    rsiBuyBelow?: number;
+    rsiSellAbove?: number;
+    macdFast?: number;
+    macdSlow?: number;
+    macdSignal?: number;
+    breakoutEntryLookback?: number;
+    breakoutExitLookback?: number;
+  };
+  period: {
+    from: string | null;
+    to: string | null;
+    sessions: number;
+    days: number;
+    sessionsPerYear: number;
+  };
+  metrics: BacktestMetrics;
+  equityCurve: BacktestEquityPoint[];
+  drawdownCurve: BacktestDrawdownPoint[];
+  monthlyReturns: BacktestMonthlyReturn[];
+  trades: BacktestTrade[];
+  adjustments: BacktestAdjustmentSummary[];
+  benchmark: {
+    symbol: string;
+    returnPercent: number | null;
+    points: number;
+  } | null;
+  warnings: string[];
+}
+
+export interface BacktestRunResponse {
+  result: BacktestResult;
+}

@@ -1,0 +1,19 @@
+/* Standalone mobile shell additions. The web app owns the rest of the CSS. */
+.mobile-pack-notice {
+  border-left: 3px solid var(--accent, #2f81f7);
+}
+
+.mobile-pack-notice .card-header {
+  margin-bottom: 8px;
+}
+
+.mobile-pack-notice strong {
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 700px) {
+  .mobile-pack-notice .row {
+    gap: 10px !important;
+    flex-direction: column;
+  }
+}

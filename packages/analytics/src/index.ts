@@ -5,3 +5,5 @@ export * from "./fees";
 export * from "./technicals";
 export * from "./intraday";
 export * from "./xirr";
+export * from "./adjust";
+export * from "./backtest";

@@ -23,3 +23,5 @@ data/personal/
 data/*.db
 data/*.db-shm
 data/*.db-wal
+apps/mobile/assets/web/
+apps/mobile/assets/pack/

@@ -3093,3 +3093,113 @@ input[type="file"] {
     max-height: 160px;
   }
 }
+
+/* ------------------------------------------------------------------ backtest */
+
+.backtest-controls {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+.backtest-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  overflow: visible;
+}
+
+.bt-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  shape-rendering: crispEdges;
+}
+
+.bt-axis {
+  fill: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.bt-equity {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.bt-benchmark {
+  fill: none;
+  stroke: var(--text-subtle);
+  stroke-width: 1.5;
+  stroke-dasharray: 5 4;
+  stroke-linejoin: round;
+}
+
+.bt-swatch {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  margin-right: 6px;
+  vertical-align: middle;
+  border-radius: 2px;
+}
+
+.bt-swatch-equity {
+  background: var(--accent);
+}
+
+.bt-swatch-benchmark {
+  background: var(--text-subtle);
+}
+
+.bt-drawdown {
+  fill: none;
+  stroke: var(--down);
+  stroke-width: 1.5;
+  stroke-linejoin: round;
+}
+
+.bt-drawdown-area {
+  fill: var(--down-soft);
+  stroke: none;
+}
+
+.backtest-reasons {
+  margin: 0;
+  padding-left: 16px;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.backtest-reasons li + li {
+  margin-top: 2px;
+}
+
+.backtest-coverage-table td {
+  vertical-align: top;
+}
+
+.backtest-actions {
+  margin-top: 6px;
+  gap: 5px;
+}
+
+.backtest-actions .chip {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.backtest-trade-table {
+  white-space: nowrap;
+}
+
+@media (max-width: 720px) {
+  .backtest-controls {
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  }
+
+  .backtest-controls .span-2 {
+    grid-column: span 2;
+  }
+}

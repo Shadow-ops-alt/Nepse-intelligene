@@ -1,107 +1,133 @@
 # NEPSE Terminal Android APK
 
-Thin Android client for the local NEPSE Terminal API. The APK contains only a
-WebView shell. The web app itself is served by the PC, exactly like the PWA.
-There is no bundled web bundle and no offline copy.
+Standalone offline Android app for NEPSE Terminal. The APK bundles the web
+build and an end-of-day data pack. At launch it starts a small HTTP server on
+`127.0.0.1` with an ephemeral port and loads the bundled app in a WebView. No
+PC API and no network are required.
 
 - Package: `com.nepse.terminal.mobile`
-- Version: 0.4.0 (versionCode 400)
+- Version: 0.5.0 (versionCode 500)
 - Min SDK: 26 (Android 8.0)
 - Target SDK: 35 (Android 15)
-- Permissions: `INTERNET`
-- Cleartext HTTP is enabled for LAN testing.
+- Permissions: `INTERNET` (used only for optional pack downloads)
+- Debug-signed for testing.
 
 ## What the app does
 
-- On first run it asks for the server URL. Default:
-  `http://192.168.100.111:4310`
-- Loads the API-served web app in a WebView with JavaScript, DOM storage and
-  database storage enabled, and mixed content allowed.
-- The system Back button walks the WebView history, then exits.
-- Links to any host other than the configured server open in the system browser.
-- If the server cannot be reached, a local error page offers Retry and Change
-  server.
-- The overflow menu has Reload and Change server.
+- Starts `LocalServer` on `127.0.0.1:<ephemeral>` and loads
+  `http://127.0.0.1:<port>/`.
+- Serves `/assets/*`, `/icons/*`, `index.html`, `sw.js` and SPA routes from the
+  bundled `assets/web` build.
+- Serves `/api/*` from `assets/pack` (or `filesDir/pack` when a newer pack was
+  downloaded) and from JSON files in `filesDir` for the personal tools.
+- Injects `assets/mobile/mobile.js` into the shell. It hides Live market,
+  Backtest and intraday timeframes, redirects their routes, and replaces the
+  Data page's update controls with a data pack notice.
+- Overflow menu: **Reload**, **Data pack info**, **Check for data updates**.
+- System Back walks the WebView history, then exits.
+- Links to any host other than `127.0.0.1` open in the system browser.
 
-Only the server URL is stored, in `SharedPreferences` under the name
-`nepse_terminal`. No credentials are stored by the app.
+The local server binds to loopback only and rejects a non-loopback Host or
+Origin. It is single-user and unauthenticated, matching the desktop app.
 
 ## Build
 
-The build uses the Android build tools directly. Gradle is not required.
+Prerequisites:
 
-### Prerequisites
-
-- A JDK 17 or newer with `javac`. A JRE alone is not enough.
-  This project was built with Amazon Corretto 21:
-  `https://corretto.aws/downloads/latest/amazon-corretto-21-x64-linux-jdk.tar.gz`
-- Android SDK command-line tools, plus:
-  - `platform-tools`
-  - `platforms;android-35`
-  - `build-tools;35.0.0`
-- `python3` (used to append `classes.dex` to the APK zip)
-- `keytool` from the JDK (first build generates `debug.keystore`)
-- Optional: ImageMagick, only if you regenerate the launcher icons
-
-### SDK setup
+- JDK 17+ with `javac`. This project was built with Amazon Corretto 21.
+- Android SDK build-tools 35.0.0 and platform android-35.
+- `python3` (appends `classes.dex` to the APK zip).
+- `keytool` from the JDK.
 
 ```bash
 export ANDROID_HOME=/tmp/android-sdk
 export JAVA_HOME=/tmp/jdk/amazon-corretto-21.0.13.1.2-linux-x64
 
-"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses
-"$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
-  --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
-```
+# 1. Build the web app.
+cd ../..
+npx --yes pnpm@12.16.1 build:web
 
-### Build and sign
+# 2. Generate the data pack (see docs/ANDROID_APK.md).
+npx --yes tsx scripts/mobile-pack/generate.ts \
+  --api-url http://127.0.0.1:4310 --years 5 --version 0.5.0
 
-```bash
+# 3. Build and sign.
 cd apps/mobile
 ./build.sh
 ```
 
-The script runs this pipeline:
+`build.sh` copies `apps/desktop/dist` to `assets/web`, checks that
+`assets/pack/manifest.json` and `assets/mobile/mobile.js` exist, then runs:
 
 1. `aapt2 compile --dir res`
-2. `aapt2 link` against `platforms/android-35/android.jar`, generating `R.java`
+2. `aapt2 link ... -A assets`
 3. `javac -source 8 -target 8 -bootclasspath android.jar`
 4. `d8 --min-api 26`
 5. Append `classes.dex` to the linked APK zip
 6. `zipalign -p 4`
-7. `apksigner sign` with the generated debug keystore
-8. Verify with `apksigner verify` and `aapt2 dump badging`
+7. `apksigner sign` with the debug keystore
+8. `apksigner verify` and `aapt2 dump badging`
 
 Output:
 
 ```
-apps/mobile/release/NEPSE-Terminal-0.4.0-android.apk
+apps/mobile/release/NEPSE-Terminal-0.5.0-standalone.apk
 ```
 
-The keystore is `apps/mobile/debug.keystore` with the standard Android debug
-credentials (alias `androiddebugkey`, password `android`). Both the keystore and
-`build/` are git-ignored. The APK is a debug-signed test build, not a Play Store
+The keystore is `apps/mobile/debug.keystore` (alias `androiddebugkey`,
+password `android`). The APK is a debug-signed test build, not a Play Store
 artifact.
 
 ### Install
 
 ```bash
-adb install -r apps/mobile/release/NEPSE-Terminal-0.4.0-android.apk
+adb install -r apps/mobile/release/NEPSE-Terminal-0.5.0-standalone.apk
 ```
 
-Or build and install in one step:
+Or `./build.sh --install`.
 
-```bash
-./build.sh --install
+## Local storage
+
+`filesDir/local/` holds `watchlist.json`, `transactions.json`, `plans.json`,
+`journal.json`, `ledger.json` and `reconciliation.json`. Journal chart images
+live in `filesDir/journal-snapshots/`. Writes are atomic.
+
+`filesDir/pack/` holds a downloaded data pack when one passes hash
+verification; it is preferred over the APK pack.
+
+## Source layout
+
+```
+apps/mobile/
+  AndroidManifest.xml
+  build.sh
+  assets/
+    web/                 staged from apps/desktop/dist by build.sh
+    pack/                generated data pack
+    mobile/              injected shell JS/CSS
+  src/com/nepse/terminal/mobile/
+    MainActivity.java    WebView, menu, update dialog
+    LocalServer.java     loopback HTTP server and API routes
+    LocalStore.java      filesDir JSON storage and local analytics
+    PackStore.java       pack access (APK assets or downloaded)
+    PackUpdater.java     download, SHA-256 verify and install
+    J.java               JSONObject with unchecked put() for responses
+  res/
+  release/
+  build/
 ```
 
-The phone must be on the same network as the PC. See
-`../../docs/ANDROID_APK.md` for running the API on the LAN.
+## Limitations
+
+- The data is a snapshot: no live LTP, no intraday bars, no backtests and no
+  archive imports. Those pages are hidden and their endpoints return 503.
+- Only the latest floorsheet day is in the pack.
+- Data freshness depends on the pack. See `docs/ANDROID_APK.md` for the update
+  mechanism and its current status.
+- Debug-signed. Not suitable for distribution.
+- No background alerts or push notifications.
 
 ## Regenerating icons
-
-The launcher icons in `res/mipmap-*` were generated from
-`apps/desktop/build/icon.png`:
 
 ```bash
 for spec in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
@@ -110,33 +136,3 @@ for spec in mdpi:48 hdpi:72 xhdpi:96 xxhdpi:144 xxxhdpi:192; do
     -strip apps/mobile/res/mipmap-$d/ic_launcher.png
 done
 ```
-
-## Layout
-
-```
-apps/mobile/
-  AndroidManifest.xml
-  build.sh
-  debug.keystore            generated on first build, ignored
-  res/
-    values/strings.xml
-    values/styles.xml
-    values-v35/styles.xml   edge-to-edge opt-out for Android 15
-    mipmap-*/ic_launcher.png
-  src/com/nepse/terminal/mobile/MainActivity.java
-  build/                    intermediate output, ignored
-  release/                  signed APK, ignored by the root release/ rule
-```
-
-## Limitations
-
-- Thin client. It requires the PC API. There is no offline data.
-- Cleartext HTTP is for trusted LAN testing only. Do not expose the API to the
-  internet.
-- Debug-signed. Not suitable for distribution.
-- The API is single-user and unauthenticated by design. The app does not add
-  authentication.
-- HTTPS works only with a certificate the Android WebView trusts. A self-signed
-  certificate shows the error page.
-- No background alerts and no push. Alerts run only while the web page is open,
-  the same as the PWA.

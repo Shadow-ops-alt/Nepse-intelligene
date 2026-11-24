@@ -119,13 +119,19 @@ There is no TLS server in this change.
 
 - Plain LAN HTTP is fine for layout and functional testing, but no service
   worker, no offline shell and no install prompt without a secure context.
-- The mobile product is the free PWA. A thin Android APK wrapper is also
-  available; see [ANDROID_APK.md](./ANDROID_APK.md).
+- The mobile product can also run as a standalone Android app. The 0.5.0 APK
+  bundles the web build and an end-of-day data pack, starts a loopback HTTP
+  server and works with no PC. See [ANDROID_APK.md](./ANDROID_APK.md). The
+  browser PWA remains the primary mobile layout test.
 - The service worker is registered only in production builds, so the Vite dev
   server never registers one.
-- The Android APK is a thin WebView client. It loads the LAN-served PWA, so the
-  PC must run the API with `NEPSE_LAN=1` and both devices must be on the same
-  network. It is debug-signed for testing, not for the Play Store. See
+- The standalone Android APK is offline-first but its data is a snapshot. It
+  ships a generated pack (5-year candle window, latest stored session) and
+  cannot fetch live prices, intraday bars, archive updates or backtests. Live
+  market and Backtest are hidden, intraday timeframes are hidden, and the Data
+  page shows a data-pack notice instead of update controls. A newer pack needs
+  either the in-app "Check for data updates" action (a release asset) or a new
+  APK. It is debug-signed for testing, not for the Play Store. See
   [ANDROID_APK.md](./ANDROID_APK.md).
 - Alerts do not run in the background on a phone. They are evaluated only while
   the PWA or browser tab is open, as described in `docs/ALERTS.md`.
