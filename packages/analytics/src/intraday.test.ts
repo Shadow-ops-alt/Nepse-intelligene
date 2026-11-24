@@ -1,11 +1,29 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregateBars,
+  bollingerValues,
   buildMinuteBars,
+  emaValues,
   isNptSessionDay,
+  macdValues,
+  rsiValues,
   sessionBars,
+  smaValues,
+  vwap,
+  type IntradayBar,
   type IntradaySample,
 } from "./intraday";
+
+function bar(
+  timestamp: string,
+  open: number,
+  high: number,
+  low: number,
+  close: number,
+  volume: number | null,
+): IntradayBar {
+  return { timestamp, open, high, low, close, volume, turnover: null };
+}
 
 function sample(
   timestamp: string,
@@ -159,5 +177,80 @@ describe("isNptSessionDay", () => {
     // 18:20 UTC on 19 Nov is 00:05 NPT on 20 Nov.
     expect(isNptSessionDay("2026-11-19T18:20:00.000Z", "2026-11-20")).toBe(true);
     expect(isNptSessionDay("2026-11-19T18:20:00.000Z", "2026-11-19")).toBe(false);
+  });
+});
+
+describe("vwap", () => {
+  it("weights each bar by volume using (H + L + C) / 3", () => {
+    const values = vwap([
+      bar("2026-11-20T05:15:00.000Z", 100, 102, 99, 100, 10),
+      bar("2026-11-20T05:16:00.000Z", 100, 108, 100, 106, 30),
+    ]);
+    // bar 1 typical = 301/3 = 100.333..., bar 2 typical = 314/3 = 104.666...
+    expect(values[0]).toBeCloseTo(301 / 3, 6);
+    expect(values[1]).toBeCloseTo((301 / 3 * 10 + 314 / 3 * 30) / 40, 6);
+  });
+
+  it("returns null while no volume has traded, then fills", () => {
+    const values = vwap([
+      bar("2026-11-20T05:15:00.000Z", 100, 100, 100, 100, null),
+      bar("2026-11-20T05:16:00.000Z", 100, 100, 100, 100, 0),
+      bar("2026-11-20T05:17:00.000Z", 100, 100, 100, 100, 5),
+    ]);
+    expect(values).toEqual([null, null, 100]);
+  });
+
+  it("holds the running VWAP across a zero-volume bar", () => {
+    const values = vwap([
+      bar("2026-11-20T05:15:00.000Z", 100, 100, 100, 100, 10),
+      bar("2026-11-20T05:16:00.000Z", 120, 120, 120, 120, 0),
+    ]);
+    expect(values[1]).toBe(100);
+  });
+
+  it("resets the accumulator on a new Nepal-Time session", () => {
+    const values = vwap([
+      bar("2026-11-20T05:15:00.000Z", 100, 100, 100, 100, 10),
+      bar("2026-11-20T05:16:00.000Z", 200, 200, 200, 200, 10),
+      // Next Nepal-Time calendar day (05:15 UTC = 11:00 NPT).
+      bar("2026-11-21T05:15:00.000Z", 300, 300, 300, 300, 10),
+    ]);
+    expect(values[0]).toBe(100);
+    expect(values[1]).toBe(150);
+    expect(values[2]).toBe(300);
+  });
+
+  it("is computed on resampled bars, not on the underlying 1m bars", () => {
+    const minute = buildMinuteBars([
+      sample("2026-11-20T05:15:05.000Z", 100, 100),
+      sample("2026-11-20T05:16:10.000Z", 110, 300),
+    ]);
+    const twoMinute = aggregateBars(minute, 2);
+    // One 2m bar: O 100, H 110, L 100, C 110, volume 200.
+    expect(twoMinute).toHaveLength(1);
+    expect(vwap(twoMinute)[0]).toBeCloseTo((110 + 100 + 110) / 3, 6);
+  });
+
+  it("returns an empty array for no bars", () => {
+    expect(vwap([])).toEqual([]);
+  });
+});
+
+describe("indicator wrappers", () => {
+  it("exposes SMA, EMA and RSI with not-enough-bars nulls", () => {
+    expect(smaValues([1, 2, 3], 3)).toEqual([null, null, 2]);
+    expect(emaValues([1, 2, 3], 3)).toEqual([null, null, 2]);
+    expect(rsiValues([1, 2, 3], 14)).toEqual([null, null, null]);
+  });
+
+  it("returns MACD and Bollinger series aligned to the input", () => {
+    const closes = Array.from({ length: 40 }, (_, index) => 100 + index);
+    const bands = bollingerValues(closes, 20, 2);
+    const macd = macdValues(closes);
+    expect(bands).toHaveLength(closes.length);
+    expect(bands[18]).toBeNull();
+    expect(bands[19]).not.toBeNull();
+    expect(macd.macd).toHaveLength(closes.length);
+    expect(macd.histogram).toHaveLength(closes.length);
   });
 });

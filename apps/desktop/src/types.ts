@@ -648,3 +648,152 @@ export interface ImportHistory {
   providerId: string;
   entries: ImportAuditEntry[];
 }
+
+// ---------------------------------------------------------------------------
+// Trading workflow: plans, journal, reconciliation and data quality
+// ---------------------------------------------------------------------------
+
+export type TradeSide = "buy" | "sell";
+
+export interface TradePlan {
+  id: number;
+  symbol: string;
+  side: TradeSide;
+  entry: number;
+  stop: number;
+  targets: number[];
+  quantity: number;
+  riskAmount: number | null;
+  riskPercent: number | null;
+  rewardRisk: number | null;
+  fees: number | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TradePlansResponse {
+  plans: TradePlan[];
+}
+
+export interface TradePlanResponse {
+  plan: TradePlan;
+}
+
+export interface JournalEntry {
+  id: number;
+  planId: number | null;
+  symbol: string;
+  side: TradeSide;
+  paper: boolean;
+  plannedEntry: number | null;
+  plannedStop: number | null;
+  plannedTarget: number | null;
+  actualEntry: number | null;
+  actualExit: number | null;
+  quantity: number | null;
+  fees: number | null;
+  pnl: number | null;
+  reason: string | null;
+  mistakes: string | null;
+  tags: string[];
+  /** Stored as JSON by the API; usually a string, so the form stringifies it. */
+  snapshot: unknown;
+  openedAt: string | null;
+  closedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JournalResponse {
+  entries: JournalEntry[];
+}
+
+export interface JournalEntryResponse {
+  entry: JournalEntry;
+}
+
+export interface ReconciliationImportResult {
+  imported: number;
+  skipped: number;
+  importId: number | null;
+}
+
+export interface ReconciliationExposure {
+  symbol: string;
+  marketValue: number;
+  percent: number;
+}
+
+export interface ReconciliationConcentration {
+  topSymbol: string | null;
+  topPercent: number;
+  hhi: number;
+}
+
+export interface ReconciliationImportRecord {
+  id: number;
+  source: string;
+  importedAt: string;
+  rowsCount: number;
+}
+
+export interface ReconciliationSummary {
+  realizedPnl: number;
+  unrealizedPnl: number;
+  totalPnl: number;
+  xirr: number | null;
+  dividends: number;
+  bonusShares: number;
+  rightsShares: number;
+  exposure: ReconciliationExposure[];
+  concentration: ReconciliationConcentration;
+  imports: ReconciliationImportRecord[];
+}
+
+export type CorporateLedgerKind = "dividend" | "bonus" | "right";
+
+export interface CorporateLedgerEntry {
+  id: number;
+  symbol: string;
+  kind: CorporateLedgerKind | string;
+  exDate: string | null;
+  amount: number | null;
+  shares: number | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface CorporateLedgerResponse {
+  entries: CorporateLedgerEntry[];
+}
+
+export type DataQualityStatus = "fresh" | "stale" | "thin" | "discrepancy" | string;
+
+export interface DataQualitySymbol {
+  symbol: string;
+  /** Last stored candle close (a price, not a date). */
+  lastCandle: number | null;
+  /** Stored quote LTP (a price, not a date). */
+  lastQuote: number | null;
+  sessions: number;
+  missingSessions: number;
+  staleDays: number | null;
+  quoteVsCandlePercent: number | null;
+  status: DataQualityStatus;
+}
+
+export interface DataQualitySummary {
+  symbols: number;
+  fresh: number;
+  stale: number;
+  missingSessions: number;
+  quoteDiscrepancies: number;
+}
+
+export interface DataQualityResponse {
+  generatedAt: string;
+  latestSession: string | null;
+  summary: DataQualitySummary;
+  symbols: DataQualitySymbol[];
+}

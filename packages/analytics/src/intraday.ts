@@ -14,6 +14,9 @@
  *   treated as a reset rather than a negative volume.
  */
 
+import { ema, rsi, sma } from "./analysis";
+import { bollinger, macd, type BollingerPoint, type MacdSeries } from "./quant";
+
 /** NEPSE trades in Nepal Time (UTC+05:45). */
 const NPT_OFFSET_MS = (5 * 60 + 45) * 60_000;
 const MINUTE_MS = 60_000;
@@ -176,4 +179,90 @@ export function isNptSessionDay(
   const ms = Date.parse(timestamp);
   if (!Number.isFinite(ms)) return false;
   return new Date(ms + NPT_OFFSET_MS).toISOString().slice(0, 10) === day;
+}
+
+function nptDay(timestamp: string): string | null {
+  const ms = Date.parse(timestamp);
+  if (!Number.isFinite(ms)) return null;
+  return new Date(ms + NPT_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+/**
+ * Running session VWAP for already-resampled bars.
+ *
+ * The value at bar `i` is `Σ(typical price × volume) / Σ(volume)` from the
+ * start of that bar's Nepal-Time session. Typical price is `(H + L + C) / 3`.
+ * The accumulator resets when the session day changes, so a multi-day input
+ * never blends two sessions. A bar without volume keeps the previous VWAP;
+ * when no volume has traded yet (or the whole series carries no volume) the
+ * value is `null` rather than a made-up price.
+ */
+export function vwap(bars: readonly IntradayBar[]): Array<number | null> {
+  const out = new Array<number | null>(bars.length).fill(null);
+  let session: string | null = null;
+  let cumulativeVolume = 0;
+  let cumulativeValue = 0;
+
+  for (let index = 0; index < bars.length; index += 1) {
+    const bar = bars[index]!;
+    const day = nptDay(bar.timestamp);
+    if (day !== session) {
+      session = day;
+      cumulativeVolume = 0;
+      cumulativeValue = 0;
+    }
+    const volume = finite(bar.volume) ? Math.max(0, bar.volume) : 0;
+    if (volume > 0) {
+      cumulativeVolume += volume;
+      cumulativeValue += ((bar.high + bar.low + bar.close) / 3) * volume;
+    }
+    out[index] =
+      cumulativeVolume > 0 ? cumulativeValue / cumulativeVolume : null;
+  }
+
+  return out;
+}
+
+/**
+ * Indicator helpers used by the intraday chart. They are thin, named wrappers
+ * over the shared analytics implementations so the chart computes on the
+ * resampled bars with exactly the same math as every other screen.
+ */
+
+export function smaValues(
+  values: readonly number[],
+  period: number,
+): Array<number | null> {
+  return sma([...values], period);
+}
+
+export function emaValues(
+  values: readonly number[],
+  period: number,
+): Array<number | null> {
+  return ema([...values], period);
+}
+
+export function rsiValues(
+  values: readonly number[],
+  period = 14,
+): Array<number | null> {
+  return rsi([...values], period);
+}
+
+export function macdValues(
+  values: readonly number[],
+  fast = 12,
+  slow = 26,
+  signalPeriod = 9,
+): MacdSeries {
+  return macd([...values], fast, slow, signalPeriod);
+}
+
+export function bollingerValues(
+  values: readonly number[],
+  period = 20,
+  k = 2,
+): Array<BollingerPoint | null> {
+  return bollinger([...values], period, k);
 }

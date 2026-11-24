@@ -390,4 +390,255 @@ describe("PersonalStore", () => {
       db.close();
     }
   });
+
+  it("creates, reads, updates and deletes trade plans", () => {
+    const db = store();
+    try {
+      const plan = db.addTradePlan({
+        symbol: "nabil",
+        side: "buy",
+        entry: 500,
+        stop: 480,
+        targets: [550, 600],
+        quantity: 10,
+        notes: "  breakout  ",
+      });
+      expect(plan).toMatchObject({
+        symbol: "NABIL",
+        side: "buy",
+        entry: 500,
+        stop: 480,
+        targets: [550, 600],
+        quantity: 10,
+        riskAmount: 200,
+        riskPercent: 4,
+        rewardRisk: 2.5,
+        fees: 0,
+        notes: "breakout",
+      });
+      expect(db.getTradePlans()).toHaveLength(1);
+      expect(db.getTradePlans("NABIL")).toHaveLength(1);
+      expect(db.getTradePlan(plan.id)?.symbol).toBe("NABIL");
+
+      const updated = db.updateTradePlan(plan.id, { stop: 470 });
+      expect(updated?.stop).toBe(470);
+      expect(updated?.riskAmount).toBe(300);
+      expect(updated?.rewardRisk).toBeCloseTo(5 / 3, 4);
+
+      expect(db.removeTradePlan(plan.id)).toBe(true);
+      expect(db.getTradePlan(plan.id)).toBeNull();
+      expect(db.removeTradePlan(plan.id)).toBe(false);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rejects invalid trade plans", () => {
+    const db = store();
+    try {
+      const valid = {
+        symbol: "NABIL",
+        side: "buy" as const,
+        entry: 500,
+        stop: 480,
+        targets: [550],
+        quantity: 10,
+      };
+      expect(() => db.addTradePlan({ ...valid, symbol: "bad symbol" })).toThrow(
+        /symbol/,
+      );
+      expect(() => db.addTradePlan({ ...valid, side: "hold" as "buy" })).toThrow(
+        /side/,
+      );
+      expect(() => db.addTradePlan({ ...valid, entry: 0 })).toThrow(/entry/);
+      expect(() => db.addTradePlan({ ...valid, quantity: 1.5 })).toThrow(
+        /quantity/,
+      );
+      expect(() => db.addTradePlan({ ...valid, targets: [] })).toThrow(
+        /targets/,
+      );
+      expect(() =>
+        db.addTradePlan({ ...valid, targets: [550, 560, 570, 580] }),
+      ).toThrow(/targets/);
+      expect(() => db.addTradePlan({ ...valid, stop: 520 })).toThrow(/stop/);
+      expect(() =>
+        db.addTradePlan({ ...valid, targets: [450] }),
+      ).toThrow(/targets/);
+      expect(() =>
+        db.addTradePlan({
+          symbol: "NABIL",
+          side: "sell",
+          entry: 500,
+          stop: 520,
+          targets: [450],
+          quantity: 10,
+        }),
+      ).not.toThrow();
+      expect(() =>
+        db.addTradePlan({
+          symbol: "NABIL",
+          side: "sell",
+          entry: 500,
+          stop: 480,
+          targets: [450],
+          quantity: 10,
+        }),
+      ).toThrow(/sell stop/);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("computes journal P&L and leaves it null without an exit", () => {
+    const db = store();
+    try {
+      const closed = db.addJournalEntry({
+        symbol: "NABIL",
+        side: "buy",
+        actualEntry: 500,
+        actualExit: 550,
+        quantity: 10,
+        fees: 25,
+        tags: ["breakout", " "],
+        snapshot: { rsi: 61 },
+        openedAt: "2026-01-02",
+        closedAt: "2026-01-05",
+      });
+      expect(closed.pnl).toBe(475);
+      expect(closed.tags).toEqual(["breakout"]);
+      expect(closed.snapshot).toEqual({ rsi: 61 });
+      expect(closed.paper).toBe(false);
+
+      const open = db.addJournalEntry({
+        symbol: "NABIL",
+        side: "buy",
+        actualEntry: 500,
+        quantity: 10,
+      });
+      expect(open.pnl).toBeNull();
+      expect(open.actualExit).toBeNull();
+
+      const short = db.addJournalEntry({
+        symbol: "NABIL",
+        side: "sell",
+        actualEntry: 500,
+        actualExit: 450,
+        quantity: 10,
+      });
+      expect(short.pnl).toBe(500);
+
+      const listed = db.getJournalEntries({ symbol: "NABIL" });
+      expect(listed).toHaveLength(3);
+      const patched = db.updateJournalEntry(open.id, { actualExit: 530 });
+      expect(patched?.pnl).toBe(300);
+      // Clearing the exit clears the P&L again: no fill is invented.
+      const cleared = db.updateJournalEntry(open.id, { actualExit: null });
+      expect(cleared?.pnl).toBeNull();
+
+      expect(db.getJournalEntries({ from: "2026-01-01", to: "2026-01-31" })).toHaveLength(
+        1,
+      );
+      expect(db.removeJournalEntry(closed.id)).toBe(true);
+      expect(db.getJournalEntries()).toHaveLength(2);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("imports reconciliation rows idempotently by external id", () => {
+    const db = store();
+    try {
+      const rows = [
+        {
+          symbol: "NABIL",
+          side: "buy" as const,
+          quantity: 10,
+          price: 500,
+          fees: 50,
+          tradedAt: "2026-01-02",
+          externalId: "broker-1",
+          notes: "first fill",
+        },
+        {
+          symbol: "NABIL",
+          side: "buy" as const,
+          quantity: 5,
+          price: 510,
+          tradedAt: "2026-01-03",
+          externalId: "broker-2",
+        },
+      ];
+      const first = db.importReconciliation("csv", rows);
+      expect(first.imported).toBe(2);
+      expect(first.skipped).toBe(0);
+      expect(first.importId).toBeGreaterThan(0);
+
+      const second = db.importReconciliation("csv", rows);
+      expect(second.imported).toBe(0);
+      expect(second.skipped).toBe(2);
+
+      // A row without an external id is always inserted.
+      const manual = db.importReconciliation("csv", [
+        {
+          symbol: "ADBL",
+          side: "sell",
+          quantity: 1,
+          price: 300,
+          tradedAt: "2026-01-04",
+        },
+      ]);
+      expect(manual.imported).toBe(1);
+
+      const transactions = db.getReconciliationTransactions();
+      expect(transactions).toHaveLength(3);
+      expect(transactions[0]).toMatchObject({
+        symbol: "NABIL",
+        source: "csv",
+        externalId: "broker-1",
+        kind: "trade",
+        notes: "first fill",
+      });
+      expect(db.getPortfolioTransactions()).toHaveLength(3);
+
+      const imports = db.listReconciliationImports();
+      expect(imports).toHaveLength(3);
+      expect(imports[0]).toMatchObject({ source: "csv", rowsCount: 1 });
+      expect(imports[1]?.summary).toEqual({ imported: 0, skipped: 2 });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("records corporate ledger entries", () => {
+    const db = store();
+    try {
+      const dividend = db.addCorporateLedgerEntry({
+        symbol: "NABIL",
+        kind: "dividend",
+        exDate: "2026-02-01",
+        amount: 1200,
+        notes: "cash dividend",
+      });
+      const bonus = db.addCorporateLedgerEntry({
+        symbol: "NABIL",
+        kind: "bonus",
+        exDate: "2026-03-01",
+        shares: 5,
+      });
+      expect(dividend.amount).toBe(1200);
+      expect(bonus.shares).toBe(5);
+      expect(db.getCorporateLedger("NABIL")).toHaveLength(2);
+      expect(db.getCorporateLedger()).toHaveLength(2);
+      expect(() =>
+        db.addCorporateLedgerEntry({
+          symbol: "NABIL",
+          kind: "merger" as "other",
+        }),
+      ).toThrow(/kind/);
+      expect(db.removeCorporateLedgerEntry(dividend.id)).toBe(true);
+      expect(db.getCorporateLedger("NABIL")).toHaveLength(1);
+    } finally {
+      db.close();
+    }
+  });
 });

@@ -1,0 +1,71 @@
+/*
+ * Intraday chart chrome. Kept out of the global stylesheet so the chart's
+ * indicator toolbar can scroll on a phone without affecting other screens.
+ */
+
+.intraday-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.intraday-toolbar-label {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.intraday-toggles {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 2px 1px 4px;
+  min-width: 0;
+  max-width: 100%;
+  scrollbar-width: thin;
+}
+
+.intraday-toggles .toggle-chip {
+  flex: 0 0 auto;
+  padding: 3px 9px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.intraday-indicator-legend {
+  row-gap: 4px;
+}
+
+.intraday-indicator-legend .swatch {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 560px) {
+  .intraday-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .intraday-toolbar-label {
+    font-size: 10px;
+  }
+
+  .intraday-toggles {
+    width: 100%;
+  }
+
+  .intraday-indicator-legend {
+    font-size: 11px;
+    gap: 8px;
+  }
+}

@@ -61,7 +61,115 @@ export interface TriggeredAlert {
   detail: string;
   direction: "bullish" | "bearish" | "neutral";
   session: string;
-  source: "eod-signal" | "price-eod" | "price-live";
+  source: "eod-signal" | "price-eod" | "price-live" | "corporate-event";
+}
+
+/**
+ * The subset of a corporate ledger row this engine needs. The API returns the
+ * full row; keeping the shape local means the alert engine does not depend on
+ * a page-level type while that page is still being built.
+ */
+export interface CorporateLedgerEntryLite {
+  id: number | string;
+  symbol: string;
+  kind: string;
+  exDate: string | null;
+  amount: number | null;
+  shares: number | null;
+  notes: string | null;
+}
+
+const CORPORATE_KIND_LABEL: Record<string, string> = {
+  dividend: "dividend",
+  bonus: "bonus issue",
+  right: "rights issue",
+  other: "corporate action",
+};
+
+/** Nepal Time calendar date, the day the exchange uses for ex-dates. */
+function nptDay(now: Date): string {
+  return new Date(now.getTime() + (5 * 60 + 45) * 60_000)
+    .toISOString()
+    .slice(0, 10);
+}
+
+function dayDelta(from: string, to: string): number | null {
+  const fromMs = Date.parse(`${from}T00:00:00Z`);
+  const toMs = Date.parse(`${to}T00:00:00Z`);
+  if (!Number.isFinite(fromMs) || !Number.isFinite(toMs)) return null;
+  return Math.round((toMs - fromMs) / 86_400_000);
+}
+
+/**
+ * Corporate actions for watchlist and portfolio symbols whose ex-date is
+ * today, within the next seven days, or up to three days overdue. These are
+ * not signal or price rules; they are deduplicated by ledger entry id and
+ * share the same notification preference as every other alert.
+ */
+export function matchCorporateEvents(input: {
+  entries: readonly CorporateLedgerEntryLite[];
+  watchlist: ReadonlySet<string>;
+  holdings: ReadonlySet<string>;
+  now?: Date;
+}): TriggeredAlert[] {
+  const scope = new Set(
+    [...input.watchlist, ...input.holdings].map((symbol) =>
+      symbol.trim().toUpperCase(),
+    ),
+  );
+  if (scope.size === 0) return [];
+  const today = nptDay(input.now ?? new Date());
+  const seen = new Set<string>();
+  const out: TriggeredAlert[] = [];
+
+  for (const entry of input.entries) {
+    if (!entry || entry.id === null || entry.id === undefined) continue;
+    if (typeof entry.symbol !== "string" || entry.symbol.trim() === "") continue;
+    const id = String(entry.id);
+    if (id === "" || seen.has(id)) continue;
+    const symbol = entry.symbol.trim().toUpperCase();
+    if (!scope.has(symbol)) continue;
+    if (!entry.exDate) continue;
+    const exDate = entry.exDate.slice(0, 10);
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(exDate)) continue;
+    const delta = dayDelta(today, exDate);
+    if (delta === null || delta < -3 || delta > 7) continue;
+    seen.add(id);
+
+    const kind =
+      CORPORATE_KIND_LABEL[String(entry.kind ?? "").trim().toLowerCase()] ??
+      "corporate action";
+    const bits: string[] = [];
+    if (typeof entry.amount === "number" && Number.isFinite(entry.amount)) {
+      bits.push(`amount ${entry.amount.toLocaleString("en-US")}`);
+    }
+    if (typeof entry.shares === "number" && Number.isFinite(entry.shares)) {
+      bits.push(`${entry.shares.toLocaleString("en-US")} shares`);
+    }
+    if (entry.notes && entry.notes.trim() !== "") bits.push(entry.notes.trim());
+
+    const timing =
+      delta === 0
+        ? "Ex-date is today"
+        : delta > 0
+          ? `Ex-date in ${delta} day${delta === 1 ? "" : "s"}`
+          : `Ex-date was ${-delta} day${delta === -1 ? "" : "s"} ago`;
+
+    out.push({
+      key: `ledger|${id}`,
+      ruleId: `corporate:${id}`,
+      symbol,
+      title: `${symbol} ${kind} ex-date ${exDate}`,
+      detail: `${timing}${bits.length > 0 ? ` · ${bits.join(" · ")}` : ""}`,
+      direction: "neutral",
+      session: exDate,
+      source: "corporate-event",
+    });
+  }
+
+  return out.sort(
+    (a, b) => a.session.localeCompare(b.session) || a.symbol.localeCompare(b.symbol),
+  );
 }
 
 export const SIGNAL_TYPE_LABEL: Record<SignalType, string> = {
@@ -263,6 +371,10 @@ interface LiveLite {
   rows: Array<{ symbol: string; ltp: number }>;
 }
 
+interface LedgerLite {
+  entries: CorporateLedgerEntryLite[];
+}
+
 /**
  * App-wide alert state: polls signals (cheap after the first, cached
  * computation) and live prices, matches rules, raises desktop notifications
@@ -271,6 +383,7 @@ interface LiveLite {
 export function useAlerts(enabled = true) {
   const [rules, setRulesState] = useState<AlertRule[]>(() => loadRules());
   const [signals, setSignals] = useState<SignalsResponse | null>(null);
+  const [ledger, setLedger] = useState<CorporateLedgerEntryLite[]>([]);
   const [context, setContext] = useState<{
     watchlist: Set<string>;
     holdings: Set<string>;
@@ -285,12 +398,15 @@ export function useAlerts(enabled = true) {
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const [signalResponse, watch, portfolio, companies, quotes] = await Promise.all([
+      const [signalResponse, watch, portfolio, companies, quotes, ledgerResponse] = await Promise.all([
         api<SignalsResponse>("/api/signals?lookback=5"),
         api<WatchlistResponse>("/api/watchlist").catch(() => ({ symbols: [] })),
         api<PortfolioLite>("/api/portfolio").catch(() => ({ positions: [] })),
         api<CompanyLite>("/api/companies").catch(() => ({ companies: [] })),
         api<QuotesLite>("/api/quotes").catch(() => ({ quotes: [] })),
+        // A missing ledger route or an empty ledger simply means no
+        // portfolio-event alerts; every other alert keeps working.
+        api<LedgerLite>("/api/corporate-ledger").catch(() => ({ entries: [] })),
       ]);
       const live = await api<LiveLite>("/api/live/market").catch(() => null);
       const prices = new Map<string, { price: number; asOf: string; live: boolean }>();
@@ -303,6 +419,9 @@ export function useAlerts(enabled = true) {
         }
       }
       setSignals(signalResponse);
+      setLedger(
+        Array.isArray(ledgerResponse?.entries) ? ledgerResponse.entries : [],
+      );
       setContext({
         watchlist: new Set(watch.symbols),
         holdings: new Set(portfolio.positions.filter((p) => p.quantity > 0).map((p) => p.symbol)),
@@ -328,25 +447,43 @@ export function useAlerts(enabled = true) {
     return () => window.clearInterval(timer);
   }, [enabled, refresh]);
 
-  const triggered = useMemo(
-    () =>
-      signals
-        ? matchAlerts({
-            rules,
-            events: signals.events,
-            watchlist: context.watchlist,
-            holdings: context.holdings,
-            activeEquities: context.active,
-            prices: context.prices,
-          })
-        : [],
-    [signals, rules, context],
-  );
+  // The Electron tray's "Check now" item dispatches this event so the renderer
+  // polls on demand without moving the rules into the main process.
+  useEffect(() => {
+    if (!enabled) return;
+    const handler = () => void refresh();
+    window.addEventListener("nepse:check-alerts", handler);
+    return () => window.removeEventListener("nepse:check-alerts", handler);
+  }, [enabled, refresh]);
+
+  const triggered = useMemo(() => {
+    // Portfolio events come from the corporate ledger and must not disappear
+    // when the signals computation fails; only the rule alerts need signals.
+    const ruleAlerts = signals
+      ? matchAlerts({
+          rules,
+          events: signals.events,
+          watchlist: context.watchlist,
+          holdings: context.holdings,
+          activeEquities: context.active,
+          prices: context.prices,
+        })
+      : [];
+    const portfolioEvents = matchCorporateEvents({
+      entries: ledger,
+      watchlist: context.watchlist,
+      holdings: context.holdings,
+    });
+    return [...ruleAlerts, ...portfolioEvents].sort(
+      (a, b) =>
+        b.session.localeCompare(a.session) || a.symbol.localeCompare(b.symbol),
+    );
+  }, [signals, rules, context, ledger]);
 
   // Desktop notifications for alerts never seen before. On the very first run
   // everything already present is marked seen without a notification burst.
   useEffect(() => {
-    if (!signals) return;
+    if (!signals && ledger.length === 0) return;
     const previous = readList(SEEN_KEY);
     const seen = new Set(previous);
     const fresh = triggered.filter((alert) => !seen.has(alert.key));

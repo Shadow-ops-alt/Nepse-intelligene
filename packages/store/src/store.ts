@@ -69,7 +69,385 @@ export interface NewPortfolioTransaction {
   fees?: number;
   tradedAt: string;
   notes?: string | null;
+  /** `csv`, `manual`, a broker name, ... Null for older/manual rows. */
+  source?: string | null;
+  /** Stable key from the source; reconciliation imports are idempotent on it. */
+  externalId?: string | null;
+  /** `trade` for ordinary transactions, or a reconciliation label. */
+  kind?: string;
 }
+
+/** A transaction row including the reconciliation metadata. */
+export interface ReconciliationTransaction extends PortfolioTransaction {
+  source: string | null;
+  externalId: string | null;
+  kind: string;
+}
+
+export interface TradePlan {
+  id: number;
+  symbol: string;
+  side: "buy" | "sell";
+  entry: number;
+  stop: number;
+  targets: number[];
+  quantity: number;
+  riskAmount: number | null;
+  riskPercent: number | null;
+  rewardRisk: number | null;
+  fees: number | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TradePlanInput {
+  symbol: string;
+  side: "buy" | "sell";
+  entry: number;
+  stop: number;
+  targets: number[];
+  quantity: number;
+  riskAmount?: number | null;
+  riskPercent?: number | null;
+  rewardRisk?: number | null;
+  fees?: number | null;
+  notes?: string | null;
+}
+
+export type TradePlanPatch = Partial<TradePlanInput>;
+
+export interface JournalEntry {
+  id: number;
+  planId: number | null;
+  symbol: string;
+  side: "buy" | "sell";
+  paper: boolean;
+  plannedEntry: number | null;
+  plannedStop: number | null;
+  plannedTarget: number | null;
+  actualEntry: number | null;
+  actualExit: number | null;
+  quantity: number | null;
+  fees: number;
+  pnl: number | null;
+  reason: string | null;
+  mistakes: string | null;
+  tags: string[];
+  snapshot: unknown;
+  openedAt: string;
+  closedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface JournalInput {
+  planId?: number | null;
+  symbol: string;
+  side: "buy" | "sell";
+  paper?: boolean;
+  plannedEntry?: number | null;
+  plannedStop?: number | null;
+  plannedTarget?: number | null;
+  actualEntry?: number | null;
+  actualExit?: number | null;
+  quantity?: number | null;
+  fees?: number | null;
+  pnl?: number | null;
+  reason?: string | null;
+  mistakes?: string | null;
+  tags?: string[];
+  snapshot?: unknown;
+  openedAt?: string | null;
+  closedAt?: string | null;
+}
+
+export type JournalPatch = Partial<JournalInput>;
+
+export type CorporateLedgerKind = "dividend" | "bonus" | "right" | "other";
+
+export interface CorporateLedgerEntry {
+  id: number;
+  symbol: string;
+  kind: CorporateLedgerKind;
+  exDate: string | null;
+  amount: number | null;
+  shares: number | null;
+  notes: string | null;
+  createdAt: string;
+}
+
+export interface NewCorporateLedgerEntry {
+  symbol: string;
+  kind: CorporateLedgerKind;
+  exDate?: string | null;
+  amount?: number | null;
+  shares?: number | null;
+  notes?: string | null;
+}
+
+export interface ReconciliationImport {
+  id: number;
+  source: string;
+  importedAt: string;
+  rowsCount: number;
+  summary: Record<string, unknown> | null;
+}
+
+const SYMBOL_PATTERN = /^[A-Z0-9._-]{1,24}$/;
+const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}(?:$|[T ])/;
+
+function roundValue(value: number, digits = 2): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+function normalizeSymbol(value: string): string {
+  const symbol = String(value ?? "").trim().toUpperCase();
+  if (!SYMBOL_PATTERN.test(symbol)) {
+    throw new Error("invalid symbol");
+  }
+  return symbol;
+}
+
+function isDateText(value: string): boolean {
+  return (
+    DATE_PATTERN.test(value) &&
+    Number.isFinite(Date.parse(`${value.slice(0, 10)}T00:00:00Z`))
+  );
+}
+
+function optionalNumber(
+  value: number | null | undefined,
+  name: string,
+  { min = 0, integer = false }: { min?: number; integer?: boolean } = {},
+): number | null {
+  if (value === null || value === undefined) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed < min) {
+    throw new Error(`${name} must be a finite number >= ${min}`);
+  }
+  if (integer && !Number.isInteger(parsed)) {
+    throw new Error(`${name} must be an integer`);
+  }
+  return parsed;
+}
+
+interface NormalizedPlan {
+  symbol: string;
+  side: "buy" | "sell";
+  entry: number;
+  stop: number;
+  targets: number[];
+  quantity: number;
+  riskAmount: number;
+  riskPercent: number;
+  rewardRisk: number;
+  fees: number;
+  notes: string | null;
+}
+
+function normalizePlan(input: TradePlanInput): NormalizedPlan {
+  const symbol = normalizeSymbol(input.symbol);
+  if (input.side !== "buy" && input.side !== "sell") {
+    throw new Error("side must be buy or sell");
+  }
+  const entry = Number(input.entry);
+  const stop = Number(input.stop);
+  if (!Number.isFinite(entry) || entry <= 0) {
+    throw new Error("entry must be a finite positive price");
+  }
+  if (!Number.isFinite(stop) || stop <= 0) {
+    throw new Error("stop must be a finite positive price");
+  }
+  if (!Array.isArray(input.targets)) {
+    throw new Error("targets must be an array of prices");
+  }
+  if (input.targets.length < 1 || input.targets.length > 3) {
+    throw new Error("targets must contain 1 to 3 prices");
+  }
+  const targets = input.targets.map((target) => Number(target));
+  for (const target of targets) {
+    if (!Number.isFinite(target) || target <= 0) {
+      throw new Error("each target must be a finite positive price");
+    }
+  }
+  const quantity = Number(input.quantity);
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    throw new Error("quantity must be a positive integer");
+  }
+  if (input.side === "buy") {
+    if (!(stop < entry)) {
+      throw new Error("buy stop must be below entry");
+    }
+    if (targets.some((target) => !(entry < target))) {
+      throw new Error("buy targets must be above entry");
+    }
+  } else {
+    if (!(stop > entry)) {
+      throw new Error("sell stop must be above entry");
+    }
+    if (targets.some((target) => !(entry > target))) {
+      throw new Error("sell targets must be below entry");
+    }
+  }
+
+  const risk = Math.abs(entry - stop);
+  const riskAmount =
+    input.riskAmount === null || input.riskAmount === undefined
+      ? risk * quantity
+      : optionalNumber(input.riskAmount, "riskAmount", { min: 0 });
+  const riskPercent =
+    input.riskPercent === null || input.riskPercent === undefined
+      ? (risk / entry) * 100
+      : optionalNumber(input.riskPercent, "riskPercent", { min: 0 });
+  const reward = Math.abs(targets[0]! - entry);
+  const rewardRisk =
+    input.rewardRisk === null || input.rewardRisk === undefined
+      ? reward / risk
+      : optionalNumber(input.rewardRisk, "rewardRisk", { min: 0 });
+  const fees =
+    input.fees === null || input.fees === undefined
+      ? 0
+      : optionalNumber(input.fees, "fees", { min: 0 });
+
+  return {
+    symbol,
+    side: input.side,
+    entry,
+    stop,
+    targets,
+    quantity,
+    riskAmount: roundValue(riskAmount!, 2),
+    riskPercent: roundValue(riskPercent!, 4),
+    rewardRisk: roundValue(rewardRisk!, 4),
+    fees: roundValue(fees!, 2),
+    notes: input.notes?.trim() || null,
+  };
+}
+
+function computeJournalPnl(
+  side: "buy" | "sell",
+  actualEntry: number | null,
+  actualExit: number | null,
+  quantity: number | null,
+  fees: number,
+): number | null {
+  // Never invent a fill: with no recorded exit there is no realised P&L.
+  if (actualEntry === null || actualExit === null || quantity === null) {
+    return null;
+  }
+  const gross =
+    side === "buy"
+      ? (actualExit - actualEntry) * quantity
+      : (actualEntry - actualExit) * quantity;
+  return roundValue(gross - fees, 2);
+}
+
+interface NormalizedJournal {
+  planId: number | null;
+  symbol: string;
+  side: "buy" | "sell";
+  paper: boolean;
+  plannedEntry: number | null;
+  plannedStop: number | null;
+  plannedTarget: number | null;
+  actualEntry: number | null;
+  actualExit: number | null;
+  quantity: number | null;
+  fees: number;
+  pnl: number | null;
+  reason: string | null;
+  mistakes: string | null;
+  tags: string[];
+  snapshot: string | null;
+  openedAt: string;
+  closedAt: string | null;
+}
+
+function normalizeJournal(input: JournalInput): NormalizedJournal {
+  const symbol = normalizeSymbol(input.symbol);
+  if (input.side !== "buy" && input.side !== "sell") {
+    throw new Error("side must be buy or sell");
+  }
+  const planId =
+    input.planId === null || input.planId === undefined
+      ? null
+      : optionalNumber(input.planId, "planId", { min: 1, integer: true });
+
+  const plannedEntry = optionalNumber(input.plannedEntry, "plannedEntry", {
+    min: 0,
+  });
+  const plannedStop = optionalNumber(input.plannedStop, "plannedStop", {
+    min: 0,
+  });
+  const plannedTarget = optionalNumber(input.plannedTarget, "plannedTarget", {
+    min: 0,
+  });
+  const actualEntry = optionalNumber(input.actualEntry, "actualEntry", {
+    min: 0,
+  });
+  const actualExit = optionalNumber(input.actualExit, "actualExit", { min: 0 });
+  const quantity =
+    input.quantity === null || input.quantity === undefined
+      ? null
+      : optionalNumber(input.quantity, "quantity", { min: 1e-9 });
+  const fees =
+    input.fees === null || input.fees === undefined
+      ? 0
+      : optionalNumber(input.fees, "fees", { min: 0 })!;
+
+  const pnl =
+    actualExit === null
+      ? null
+      : input.pnl !== null && input.pnl !== undefined
+        ? optionalNumber(input.pnl, "pnl", {
+            min: Number.NEGATIVE_INFINITY,
+          })
+        : computeJournalPnl(input.side, actualEntry, actualExit, quantity, fees);
+
+  const openedAt = input.openedAt ?? new Date().toISOString();
+  if (!isDateText(openedAt)) {
+    throw new Error("openedAt must be YYYY-MM-DD or an ISO timestamp");
+  }
+  const closedAt = input.closedAt ?? null;
+  if (closedAt !== null && !isDateText(closedAt)) {
+    throw new Error("closedAt must be YYYY-MM-DD or an ISO timestamp");
+  }
+
+  const rawTags = input.tags ?? [];
+  if (!Array.isArray(rawTags)) {
+    throw new Error("tags must be an array of strings");
+  }
+  const tags = rawTags.map((tag) => String(tag).trim()).filter(Boolean);
+
+  let snapshot: string | null = null;
+  if (input.snapshot !== undefined && input.snapshot !== null) {
+    snapshot = JSON.stringify(input.snapshot);
+  }
+
+  return {
+    planId,
+    symbol,
+    side: input.side,
+    paper: input.paper === true,
+    plannedEntry,
+    plannedStop,
+    plannedTarget,
+    actualEntry,
+    actualExit,
+    quantity,
+    fees,
+    pnl: pnl === null ? null : roundValue(pnl, 2),
+    reason: input.reason?.trim() || null,
+    mistakes: input.mistakes?.trim() || null,
+    tags,
+    snapshot,
+    openedAt,
+    closedAt,
+  };
+}
+
 
 export interface ImportAuditEntry {
   id: number;
@@ -371,6 +749,114 @@ export class PersonalStore {
           ON intraday_candles (provider_id, kind, symbol, session_date, timeframe);
       `);
       this.recordMigration(4);
+    }
+
+    if (!applied.has(5)) {
+      // Trade plans, the trade journal, the corporate-action ledger and
+      // reconciliation metadata. Portfolio columns are added only when the
+      // table predates them (a fresh database creates them in one pass below).
+      this.db.exec(`
+        CREATE TABLE IF NOT EXISTS trade_plans (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          symbol TEXT NOT NULL,
+          side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+          entry REAL NOT NULL,
+          stop REAL NOT NULL,
+          targets TEXT NOT NULL,
+          quantity INTEGER NOT NULL,
+          risk_amount REAL,
+          risk_percent REAL,
+          reward_risk REAL,
+          fees REAL,
+          notes TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_trade_plans_symbol
+          ON trade_plans (symbol, id);
+
+        CREATE TABLE IF NOT EXISTS trade_journal (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          plan_id INTEGER,
+          symbol TEXT NOT NULL,
+          side TEXT NOT NULL CHECK (side IN ('buy', 'sell')),
+          paper INTEGER NOT NULL DEFAULT 0,
+          planned_entry REAL,
+          planned_stop REAL,
+          planned_target REAL,
+          actual_entry REAL,
+          actual_exit REAL,
+          quantity REAL,
+          fees REAL NOT NULL DEFAULT 0,
+          pnl REAL,
+          reason TEXT,
+          mistakes TEXT,
+          tags TEXT NOT NULL DEFAULT '[]',
+          snapshot TEXT,
+          opened_at TEXT NOT NULL,
+          closed_at TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_trade_journal_symbol
+          ON trade_journal (symbol, opened_at);
+
+        CREATE TABLE IF NOT EXISTS corporate_ledger (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          symbol TEXT NOT NULL,
+          kind TEXT NOT NULL CHECK (kind IN ('dividend', 'bonus', 'right', 'other')),
+          ex_date TEXT,
+          amount REAL,
+          shares REAL,
+          notes TEXT,
+          created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX IF NOT EXISTS idx_corporate_ledger_symbol
+          ON corporate_ledger (symbol, ex_date);
+
+        CREATE TABLE IF NOT EXISTS reconciliation_imports (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          source TEXT NOT NULL,
+          imported_at TEXT NOT NULL,
+          rows_count INTEGER NOT NULL,
+          summary TEXT
+        );
+      `);
+
+      const portfolioColumns = new Set(
+        this.db
+          .prepare("PRAGMA table_info(portfolio_transactions)")
+          .all()
+          .map((row) => String(row.name)),
+      );
+      if (!portfolioColumns.has("source")) {
+        this.db.exec("ALTER TABLE portfolio_transactions ADD COLUMN source TEXT");
+      }
+      if (!portfolioColumns.has("external_id")) {
+        this.db.exec(
+          "ALTER TABLE portfolio_transactions ADD COLUMN external_id TEXT",
+        );
+      }
+      if (!portfolioColumns.has("kind")) {
+        this.db.exec(
+          "ALTER TABLE portfolio_transactions ADD COLUMN kind TEXT NOT NULL DEFAULT 'trade'",
+        );
+      }
+      if (!portfolioColumns.has("notes")) {
+        this.db.exec("ALTER TABLE portfolio_transactions ADD COLUMN notes TEXT");
+      }
+      // Idempotent reconciliation: an external id can appear only once, while
+      // rows without one (manual entries) are unaffected.
+      this.db.exec(`
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_portfolio_external_id
+          ON portfolio_transactions (external_id)
+          WHERE external_id IS NOT NULL;
+      `);
+
+      this.recordMigration(5);
     }
   }
 
@@ -933,8 +1419,9 @@ export class PersonalStore {
     const result = this.db
       .prepare(
         `INSERT INTO portfolio_transactions (
-           symbol, side, quantity, price, fees, traded_at, notes, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+           symbol, side, quantity, price, fees, traded_at, notes, created_at,
+           source, external_id, kind
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         symbol,
@@ -945,6 +1432,9 @@ export class PersonalStore {
         input.tradedAt,
         input.notes?.trim() || null,
         createdAt,
+        input.source?.trim() || null,
+        input.externalId?.trim() || null,
+        input.kind?.trim() || "trade",
       );
 
     return {
@@ -985,6 +1475,634 @@ export class PersonalStore {
       .prepare(`DELETE FROM portfolio_transactions WHERE id = ?`)
       .run(id);
     return Number(result.changes) > 0;
+  }
+
+  /** Portfolio rows plus the reconciliation metadata columns. */
+  getReconciliationTransactions(): ReconciliationTransaction[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM portfolio_transactions
+         ORDER BY traded_at, id`,
+      )
+      .all()
+      .map((row) => ({
+        id: Number(row.id),
+        symbol: String(row.symbol),
+        side: String(row.side) as PortfolioTransaction["side"],
+        quantity: Number(row.quantity),
+        price: Number(row.price),
+        fees: Number(row.fees),
+        tradedAt: String(row.traded_at),
+        notes: row.notes === null ? null : String(row.notes),
+        createdAt: String(row.created_at),
+        source: row.source === null || row.source === undefined
+          ? null
+          : String(row.source),
+        externalId:
+          row.external_id === null || row.external_id === undefined
+            ? null
+            : String(row.external_id),
+        kind: row.kind === null || row.kind === undefined
+          ? "trade"
+          : String(row.kind),
+      }));
+  }
+
+  // -----------------------------------------------------------------------
+  // trade plans
+  // -----------------------------------------------------------------------
+
+  private tradePlanFromRow(row: Record<string, unknown>): TradePlan {
+    let targets: number[] = [];
+    try {
+      const parsed = JSON.parse(String(row.targets));
+      if (Array.isArray(parsed)) targets = parsed.map((value) => Number(value));
+    } catch {
+      targets = [];
+    }
+    return {
+      id: Number(row.id),
+      symbol: String(row.symbol),
+      side: String(row.side) as TradePlan["side"],
+      entry: Number(row.entry),
+      stop: Number(row.stop),
+      targets,
+      quantity: Number(row.quantity),
+      riskAmount: row.risk_amount === null ? null : Number(row.risk_amount),
+      riskPercent: row.risk_percent === null ? null : Number(row.risk_percent),
+      rewardRisk: row.reward_risk === null ? null : Number(row.reward_risk),
+      fees: row.fees === null ? null : Number(row.fees),
+      notes: row.notes === null ? null : String(row.notes),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+  }
+
+  addTradePlan(input: TradePlanInput): TradePlan {
+    const plan = normalizePlan(input);
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        `INSERT INTO trade_plans (
+           symbol, side, entry, stop, targets, quantity, risk_amount,
+           risk_percent, reward_risk, fees, notes, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        plan.symbol,
+        plan.side,
+        plan.entry,
+        plan.stop,
+        JSON.stringify(plan.targets),
+        plan.quantity,
+        plan.riskAmount,
+        plan.riskPercent,
+        plan.rewardRisk,
+        plan.fees,
+        plan.notes,
+        now,
+        now,
+      );
+    return {
+      id: Number(result.lastInsertRowid),
+      ...plan,
+      createdAt: now,
+      updatedAt: now,
+    };
+  }
+
+  getTradePlans(symbol?: string): TradePlan[] {
+    const rows = symbol
+      ? this.db
+          .prepare(
+            `SELECT * FROM trade_plans WHERE symbol = ? ORDER BY created_at DESC, id DESC`,
+          )
+          .all(normalizeSymbol(symbol))
+      : this.db
+          .prepare(
+            `SELECT * FROM trade_plans ORDER BY created_at DESC, id DESC`,
+          )
+          .all();
+    return rows.map((row) => this.tradePlanFromRow(row));
+  }
+
+  getTradePlan(id: number): TradePlan | null {
+    const row = this.db
+      .prepare(`SELECT * FROM trade_plans WHERE id = ?`)
+      .get(id);
+    return row ? this.tradePlanFromRow(row) : null;
+  }
+
+  updateTradePlan(id: number, patch: TradePlanPatch): TradePlan | null {
+    const existing = this.getTradePlan(id);
+    if (!existing) return null;
+    const touchesDerived = ["entry", "stop", "targets", "quantity"].some(
+      (field) => Object.prototype.hasOwnProperty.call(patch, field),
+    );
+    const merged = normalizePlan({
+      symbol: patch.symbol ?? existing.symbol,
+      side: patch.side ?? existing.side,
+      entry: patch.entry ?? existing.entry,
+      stop: patch.stop ?? existing.stop,
+      targets: patch.targets ?? existing.targets,
+      quantity: patch.quantity ?? existing.quantity,
+      riskAmount:
+        patch.riskAmount !== undefined
+          ? patch.riskAmount
+          : touchesDerived
+            ? undefined
+            : existing.riskAmount,
+      riskPercent:
+        patch.riskPercent !== undefined
+          ? patch.riskPercent
+          : touchesDerived
+            ? undefined
+            : existing.riskPercent,
+      rewardRisk:
+        patch.rewardRisk !== undefined
+          ? patch.rewardRisk
+          : touchesDerived
+            ? undefined
+            : existing.rewardRisk,
+      fees: patch.fees !== undefined ? patch.fees : existing.fees,
+      notes: patch.notes !== undefined ? patch.notes : existing.notes,
+    });
+    const updatedAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE trade_plans SET
+           symbol = ?, side = ?, entry = ?, stop = ?, targets = ?,
+           quantity = ?, risk_amount = ?, risk_percent = ?, reward_risk = ?,
+           fees = ?, notes = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        merged.symbol,
+        merged.side,
+        merged.entry,
+        merged.stop,
+        JSON.stringify(merged.targets),
+        merged.quantity,
+        merged.riskAmount,
+        merged.riskPercent,
+        merged.rewardRisk,
+        merged.fees,
+        merged.notes,
+        updatedAt,
+        id,
+      );
+    return this.getTradePlan(id);
+  }
+
+  removeTradePlan(id: number): boolean {
+    const result = this.db
+      .prepare(`DELETE FROM trade_plans WHERE id = ?`)
+      .run(id);
+    return Number(result.changes) > 0;
+  }
+
+  // -----------------------------------------------------------------------
+  // trade journal
+  // -----------------------------------------------------------------------
+
+  private journalFromRow(row: Record<string, unknown>): JournalEntry {
+    let tags: string[] = [];
+    try {
+      const parsed = JSON.parse(String(row.tags));
+      if (Array.isArray(parsed)) tags = parsed.map((tag) => String(tag));
+    } catch {
+      tags = [];
+    }
+    let snapshot: unknown = null;
+    if (row.snapshot !== null && row.snapshot !== undefined) {
+      const text = String(row.snapshot);
+      try {
+        snapshot = JSON.parse(text);
+      } catch {
+        snapshot = text;
+      }
+    }
+    return {
+      id: Number(row.id),
+      planId: row.plan_id === null ? null : Number(row.plan_id),
+      symbol: String(row.symbol),
+      side: String(row.side) as JournalEntry["side"],
+      paper: Number(row.paper) === 1,
+      plannedEntry:
+        row.planned_entry === null ? null : Number(row.planned_entry),
+      plannedStop: row.planned_stop === null ? null : Number(row.planned_stop),
+      plannedTarget:
+        row.planned_target === null ? null : Number(row.planned_target),
+      actualEntry: row.actual_entry === null ? null : Number(row.actual_entry),
+      actualExit: row.actual_exit === null ? null : Number(row.actual_exit),
+      quantity: row.quantity === null ? null : Number(row.quantity),
+      fees: Number(row.fees),
+      pnl: row.pnl === null ? null : Number(row.pnl),
+      reason: row.reason === null ? null : String(row.reason),
+      mistakes: row.mistakes === null ? null : String(row.mistakes),
+      tags,
+      snapshot,
+      openedAt: String(row.opened_at),
+      closedAt: row.closed_at === null ? null : String(row.closed_at),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    };
+  }
+
+  private journalInputFromEntry(entry: JournalEntry): JournalInput {
+    return {
+      planId: entry.planId,
+      symbol: entry.symbol,
+      side: entry.side,
+      paper: entry.paper,
+      plannedEntry: entry.plannedEntry,
+      plannedStop: entry.plannedStop,
+      plannedTarget: entry.plannedTarget,
+      actualEntry: entry.actualEntry,
+      actualExit: entry.actualExit,
+      quantity: entry.quantity,
+      fees: entry.fees,
+      pnl: entry.pnl,
+      reason: entry.reason,
+      mistakes: entry.mistakes,
+      tags: entry.tags,
+      snapshot: entry.snapshot,
+      openedAt: entry.openedAt,
+      closedAt: entry.closedAt,
+    };
+  }
+
+  addJournalEntry(input: JournalInput): JournalEntry {
+    const entry = normalizeJournal(input);
+    const now = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        `INSERT INTO trade_journal (
+           plan_id, symbol, side, paper, planned_entry, planned_stop,
+           planned_target, actual_entry, actual_exit, quantity, fees, pnl,
+           reason, mistakes, tags, snapshot, opened_at, closed_at,
+           created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        entry.planId,
+        entry.symbol,
+        entry.side,
+        entry.paper ? 1 : 0,
+        entry.plannedEntry,
+        entry.plannedStop,
+        entry.plannedTarget,
+        entry.actualEntry,
+        entry.actualExit,
+        entry.quantity,
+        entry.fees,
+        entry.pnl,
+        entry.reason,
+        entry.mistakes,
+        JSON.stringify(entry.tags),
+        entry.snapshot,
+        entry.openedAt,
+        entry.closedAt,
+        now,
+        now,
+      );
+    return this.getJournalEntry(Number(result.lastInsertRowid))!;
+  }
+
+  getJournalEntry(id: number): JournalEntry | null {
+    const row = this.db
+      .prepare(`SELECT * FROM trade_journal WHERE id = ?`)
+      .get(id);
+    return row ? this.journalFromRow(row) : null;
+  }
+
+  getJournalEntries(
+    query: { symbol?: string; from?: string; to?: string } = {},
+  ): JournalEntry[] {
+    const clauses: string[] = [];
+    const params: string[] = [];
+    if (query.symbol) {
+      clauses.push("symbol = ?");
+      params.push(normalizeSymbol(query.symbol));
+    }
+    if (query.from) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(query.from)) {
+        throw new Error("from must be YYYY-MM-DD");
+      }
+      clauses.push("substr(opened_at, 1, 10) >= ?");
+      params.push(query.from);
+    }
+    if (query.to) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(query.to)) {
+        throw new Error("to must be YYYY-MM-DD");
+      }
+      clauses.push("substr(opened_at, 1, 10) <= ?");
+      params.push(query.to);
+    }
+    const where = clauses.length > 0 ? `WHERE ${clauses.join(" AND ")}` : "";
+    return this.db
+      .prepare(
+        `SELECT * FROM trade_journal ${where}
+         ORDER BY opened_at DESC, id DESC`,
+      )
+      .all(...params)
+      .map((row) => this.journalFromRow(row));
+  }
+
+  updateJournalEntry(id: number, patch: JournalPatch): JournalEntry | null {
+    const existing = this.getJournalEntry(id);
+    if (!existing) return null;
+    const base = this.journalInputFromEntry(existing);
+    const pnlFields: Array<keyof JournalInput> = [
+      "side",
+      "actualEntry",
+      "actualExit",
+      "quantity",
+      "fees",
+    ];
+    const touchesPnl = pnlFields.some((field) =>
+      Object.prototype.hasOwnProperty.call(patch, field),
+    );
+    const merged: JournalInput = { ...base, ...patch };
+    if (!Object.prototype.hasOwnProperty.call(patch, "pnl") && !touchesPnl) {
+      // Nothing that feeds the formula changed: keep a user-supplied value.
+      merged.pnl = existing.pnl;
+    } else if (!Object.prototype.hasOwnProperty.call(patch, "pnl")) {
+      delete merged.pnl;
+    }
+    const entry = normalizeJournal(merged);
+    const updatedAt = new Date().toISOString();
+    this.db
+      .prepare(
+        `UPDATE trade_journal SET
+           plan_id = ?, symbol = ?, side = ?, paper = ?, planned_entry = ?,
+           planned_stop = ?, planned_target = ?, actual_entry = ?,
+           actual_exit = ?, quantity = ?, fees = ?, pnl = ?, reason = ?,
+           mistakes = ?, tags = ?, snapshot = ?, opened_at = ?,
+           closed_at = ?, updated_at = ?
+         WHERE id = ?`,
+      )
+      .run(
+        entry.planId,
+        entry.symbol,
+        entry.side,
+        entry.paper ? 1 : 0,
+        entry.plannedEntry,
+        entry.plannedStop,
+        entry.plannedTarget,
+        entry.actualEntry,
+        entry.actualExit,
+        entry.quantity,
+        entry.fees,
+        entry.pnl,
+        entry.reason,
+        entry.mistakes,
+        JSON.stringify(entry.tags),
+        entry.snapshot,
+        entry.openedAt,
+        entry.closedAt,
+        updatedAt,
+        id,
+      );
+    return this.getJournalEntry(id);
+  }
+
+  removeJournalEntry(id: number): boolean {
+    const result = this.db
+      .prepare(`DELETE FROM trade_journal WHERE id = ?`)
+      .run(id);
+    return Number(result.changes) > 0;
+  }
+
+  // -----------------------------------------------------------------------
+  // corporate ledger
+  // -----------------------------------------------------------------------
+
+  private corporateLedgerFromRow(
+    row: Record<string, unknown>,
+  ): CorporateLedgerEntry {
+    return {
+      id: Number(row.id),
+      symbol: String(row.symbol),
+      kind: String(row.kind) as CorporateLedgerKind,
+      exDate: row.ex_date === null ? null : String(row.ex_date),
+      amount: row.amount === null ? null : Number(row.amount),
+      shares: row.shares === null ? null : Number(row.shares),
+      notes: row.notes === null ? null : String(row.notes),
+      createdAt: String(row.created_at),
+    };
+  }
+
+  addCorporateLedgerEntry(input: NewCorporateLedgerEntry): CorporateLedgerEntry {
+    const symbol = normalizeSymbol(input.symbol);
+    const kinds: CorporateLedgerKind[] = ["dividend", "bonus", "right", "other"];
+    if (!kinds.includes(input.kind)) {
+      throw new Error("kind must be dividend, bonus, right or other");
+    }
+    let exDate: string | null = null;
+    if (input.exDate !== null && input.exDate !== undefined) {
+      const text = String(input.exDate);
+      if (!isDateText(text)) {
+        throw new Error("exDate must be YYYY-MM-DD or an ISO timestamp");
+      }
+      exDate = text;
+    }
+    const amount = optionalNumber(input.amount, "amount", { min: 0 });
+    const shares = optionalNumber(input.shares, "shares", { min: 0 });
+    const createdAt = new Date().toISOString();
+    const result = this.db
+      .prepare(
+        `INSERT INTO corporate_ledger (
+           symbol, kind, ex_date, amount, shares, notes, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        symbol,
+        input.kind,
+        exDate,
+        amount,
+        shares,
+        input.notes?.trim() || null,
+        createdAt,
+      );
+    return this.corporateLedgerFromRow(
+      this.db
+        .prepare(`SELECT * FROM corporate_ledger WHERE id = ?`)
+        .get(Number(result.lastInsertRowid))!,
+    );
+  }
+
+  getCorporateLedger(symbol?: string): CorporateLedgerEntry[] {
+    const rows = symbol
+      ? this.db
+          .prepare(
+            `SELECT * FROM corporate_ledger WHERE symbol = ?
+             ORDER BY COALESCE(ex_date, created_at), id`,
+          )
+          .all(normalizeSymbol(symbol))
+      : this.db
+          .prepare(
+            `SELECT * FROM corporate_ledger
+             ORDER BY COALESCE(ex_date, created_at), id`,
+          )
+          .all();
+    return rows.map((row) => this.corporateLedgerFromRow(row));
+  }
+
+  removeCorporateLedgerEntry(id: number): boolean {
+    const result = this.db
+      .prepare(`DELETE FROM corporate_ledger WHERE id = ?`)
+      .run(id);
+    return Number(result.changes) > 0;
+  }
+
+  // -----------------------------------------------------------------------
+  // reconciliation
+  // -----------------------------------------------------------------------
+
+  /**
+   * Import broker rows idempotently. A row with an external id that already
+   * exists is skipped; rows without one are always inserted. Everything runs
+   * in one transaction, and the import itself is recorded.
+   */
+  importReconciliation(
+    source: string,
+    rows: NewPortfolioTransaction[],
+  ): { imported: number; skipped: number; importId: number } {
+    const cleanSource = String(source ?? "").trim();
+    if (!cleanSource) throw new Error("source is required");
+    return this.runInTransaction(() => {
+      let imported = 0;
+      let skipped = 0;
+      for (const row of rows) {
+        const externalId = row.externalId?.trim() || null;
+        if (externalId) {
+          const existing = this.db
+            .prepare(
+              `SELECT 1 AS found FROM portfolio_transactions
+               WHERE external_id = ? LIMIT 1`,
+            )
+            .get(externalId);
+          if (existing) {
+            skipped += 1;
+            continue;
+          }
+        }
+        this.addPortfolioTransaction({
+          ...row,
+          source: row.source?.trim() || cleanSource,
+          externalId,
+        });
+        imported += 1;
+      }
+      const importId = this.recordReconciliationImport(
+        cleanSource,
+        rows.length,
+        { imported, skipped },
+      );
+      return { imported, skipped, importId };
+    });
+  }
+
+  private recordReconciliationImport(
+    source: string,
+    rowsCount: number,
+    summary: Record<string, unknown>,
+  ): number {
+    const result = this.db
+      .prepare(
+        `INSERT INTO reconciliation_imports (
+           source, imported_at, rows_count, summary
+         ) VALUES (?, ?, ?, ?)`,
+      )
+      .run(source, new Date().toISOString(), rowsCount, JSON.stringify(summary));
+    return Number(result.lastInsertRowid);
+  }
+
+  listReconciliationImports(): ReconciliationImport[] {
+    return this.db
+      .prepare(
+        `SELECT * FROM reconciliation_imports ORDER BY imported_at DESC, id DESC`,
+      )
+      .all()
+      .map((row) => {
+        let summary: Record<string, unknown> | null = null;
+        if (row.summary !== null && row.summary !== undefined) {
+          try {
+            const parsed = JSON.parse(String(row.summary));
+            summary =
+              parsed && typeof parsed === "object"
+                ? (parsed as Record<string, unknown>)
+                : null;
+          } catch {
+            summary = null;
+          }
+        }
+        return {
+          id: Number(row.id),
+          source: String(row.source),
+          importedAt: String(row.imported_at),
+          rowsCount: Number(row.rows_count),
+          summary,
+        };
+      });
+  }
+
+  // -----------------------------------------------------------------------
+  // data-quality helpers
+  // -----------------------------------------------------------------------
+
+  /**
+   * The most recent `sessionLimit` trading dates for a series and every daily
+   * row of those sessions. Reads only the columns the data-quality report
+   * needs instead of a full candle history.
+   */
+  getCandleSessionIndex(
+    providerId: string,
+    kind: SeriesKind = "equity",
+    timeframe = "1day",
+    sessionLimit = 60,
+  ): {
+    sessions: string[];
+    rows: Array<{
+      symbol: string;
+      session: string;
+      timestamp: string;
+      close: number;
+    }>;
+  } {
+    const limit = Math.max(1, Math.floor(sessionLimit));
+    const sessions = this.db
+      .prepare(
+        `SELECT DISTINCT substr(timestamp, 1, 10) AS session
+         FROM candles
+         WHERE provider_id = ? AND kind = ? AND timeframe = ?
+         ORDER BY session DESC
+         LIMIT ?`,
+      )
+      .all(providerId, kind, timeframe, limit)
+      .map((row) => String(row.session))
+      .reverse();
+    if (sessions.length === 0) return { sessions: [], rows: [] };
+    const from = sessions[0]!;
+    const to = sessions[sessions.length - 1]!;
+    const rows = this.db
+      .prepare(
+        `SELECT symbol, substr(timestamp, 1, 10) AS session, timestamp, close
+         FROM candles
+         WHERE provider_id = ? AND kind = ? AND timeframe = ?
+           AND substr(timestamp, 1, 10) >= ?
+           AND substr(timestamp, 1, 10) <= ?
+         ORDER BY symbol, timestamp`,
+      )
+      .all(providerId, kind, timeframe, from, to)
+      .map((row) => ({
+        symbol: String(row.symbol),
+        session: String(row.session),
+        timestamp: String(row.timestamp),
+        close: Number(row.close),
+      }));
+    return { sessions, rows };
   }
 
   getSnapshot<T>(providerId: string, capability: string, naturalKey: string): T | undefined {

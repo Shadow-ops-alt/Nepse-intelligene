@@ -41,6 +41,10 @@ import { SectorsPage } from "./pages/SectorsPage";
 import { FundamentalsPage } from "./pages/FundamentalsPage";
 import { FloorsheetPage } from "./pages/FloorsheetPage";
 import { EventsPage } from "./pages/EventsPage";
+import { TradePlanPage } from "./pages/TradePlanPage";
+import { JournalPage } from "./pages/JournalPage";
+import { ReconciliationPage } from "./pages/ReconciliationPage";
+import { DataQualityPage } from "./pages/DataQualityPage";
 import { useAlerts } from "./alerts";
 
 function useHashRoute(): string {
@@ -170,6 +174,38 @@ const PERSONAL: NavItem[] = [
     title: "Share calculator",
     crumb: "Buy/sell cost, CGT, breakeven, WACC, bonus/right and dividend yield",
     icon: Icon.Sigma,
+    key: "",
+  },
+  {
+    path: "/trade-plan",
+    label: "Trade plan",
+    title: "Trade plan",
+    crumb: "Position sizing, risk/reward, estimated costs and a manual order sheet",
+    icon: Icon.Candles,
+    key: "",
+  },
+  {
+    path: "/journal",
+    label: "Journal",
+    title: "Trade journal",
+    crumb: "Paper and real trades, P&L, R multiples and a monthly review",
+    icon: Icon.Watchlist,
+    key: "",
+  },
+  {
+    path: "/reconciliation",
+    label: "Reconciliation",
+    title: "Reconciliation",
+    crumb: "Broker/CDSC import, exposure, XIRR and the corporate ledger",
+    icon: Icon.Portfolio,
+    key: "",
+  },
+  {
+    path: "/data-quality",
+    label: "Data quality",
+    title: "Data quality",
+    crumb: "Freshness, missing sessions and quote-versus-candle discrepancies",
+    icon: Icon.Data,
     key: "",
   },
 ];
@@ -404,6 +440,14 @@ export function App() {
     content = <EventsPage onOpenSymbol={openSymbol} />;
   } else if (page === "calculator") {
     content = <CalculatorPage />;
+  } else if (page === "trade-plan") {
+    content = <TradePlanPage />;
+  } else if (page === "journal") {
+    content = <JournalPage />;
+  } else if (page === "reconciliation") {
+    content = <ReconciliationPage />;
+  } else if (page === "data-quality") {
+    content = <DataQualityPage />;
   } else if (page === "settings") {
     content = <SettingsPage meta={meta} onOpenData={() => navigate("/data")} />;
   } else {

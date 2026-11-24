@@ -4,3 +4,4 @@ export * from "./quant";
 export * from "./fees";
 export * from "./technicals";
 export * from "./intraday";
+export * from "./xirr";

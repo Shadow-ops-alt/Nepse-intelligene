@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { MarketDataProvider, RuntimePolicy } from "@stock/core";
 import type { PersonalStore } from "@stock/store";
@@ -9,6 +9,10 @@ import {
   type CompanyDetailsResult,
 } from "./web/company-details";
 import { syncPersonalData, type SyncResult } from "./sync";
+import {
+  validateImportedStore,
+  type ImportValidationReport,
+} from "./validate-import";
 
 /**
  * One automatic refresh = the same pipeline as `pnpm personal:update`:
@@ -61,6 +65,8 @@ export interface PersonalRefreshResult {
   bulk: BulkResult | null;
   details: CompanyDetailsResult | null;
   sync: SyncResult;
+  /** Post-import checks; null if the checks themselves could not run. */
+  validation: ImportValidationReport | null;
   warnings: string[];
 }
 
@@ -195,6 +201,30 @@ export async function runPersonalRefresh(
   });
   warnings.push(...sync.warnings);
 
+  // Report-only data quality pass. It never deletes or rewrites a row: the
+  // report lands beside the import and at most a few lines reach the user.
+  let validation: ImportValidationReport | null = null;
+  try {
+    validation = validateImportedStore({
+      store: options.store,
+      providerId: sync.providerId,
+      now,
+    });
+    const validationPath = join(reportsDir, "validation.json");
+    writeFileSync(validationPath, `${JSON.stringify(validation, null, 2)}\n`);
+    for (const issue of validation.issues.slice(0, 3)) {
+      warnings.push(`Data validation: ${issue.message}`);
+    }
+    const remaining = validation.issues.length - 3;
+    if (remaining > 0) {
+      warnings.push(
+        `Data validation: ${remaining} more issue${remaining === 1 ? "" : "s"} in ${validationPath}`,
+      );
+    }
+  } catch (error) {
+    warnings.push(`data validation could not run: ${message(error)}`);
+  }
+
   return {
     startedAt,
     finishedAt: new Date().toISOString(),
@@ -203,6 +233,7 @@ export async function runPersonalRefresh(
     bulk,
     details,
     sync,
+    validation,
     warnings,
   };
 }

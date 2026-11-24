@@ -246,12 +246,14 @@ export function AlertsPage({
   }, [screenerState.data, events, alerts.context.active]);
 
   const unreadKeys = alerts.triggered.filter((a) => !alerts.read.has(a.key)).map((a) => a.key);
+  const corporateEvents = alerts.triggered.filter((a) => a.source === "corporate-event");
+  const ruleAlerts = alerts.triggered.filter((a) => a.source !== "corporate-event");
 
   if (alerts.loading && !alerts.signals) {
     return <Spinner label="Computing signals over every stored series (first run takes a few seconds)" />;
   }
 
-  if (alerts.error && !alerts.signals) {
+  if (alerts.error && !alerts.signals && corporateEvents.length === 0) {
     return (
       <EmptyState title="Signals unavailable">
         {alerts.error}
@@ -261,6 +263,12 @@ export function AlertsPage({
 
   return (
     <div className="stack">
+      {alerts.error && !alerts.signals && (
+        <Notice tone="warn">
+          Signal alerts are unavailable: {alerts.error}. Portfolio events from
+          the corporate ledger are still shown below.
+        </Notice>
+      )}
       <div className="stats-row">
         <div className="stat">
           <span className="stat-label">Last session</span>
@@ -299,6 +307,14 @@ export function AlertsPage({
           </div>
         </div>
       </div>
+
+      <Notice tone="info">
+        On the desktop app, alerts keep running in the system tray after you
+        close the window. They stop only when you choose <strong>Quit</strong>{" "}
+        from the tray menu; use <strong>Open NEPSE Terminal</strong> to bring
+        the window back. On mobile and in the installed PWA, alerts run only
+        while the page is open. Live prices are unofficial.
+      </Notice>
 
       <Card>
         <Tabs<Tab>
@@ -396,52 +412,105 @@ export function AlertsPage({
             </div>
             {alerts.triggered.length === 0 ? (
               <EmptyState title="No alerts match your rules yet">
-                Add symbols to your watchlist or portfolio, or widen a rule's
-                scope on the Alert rules tab.
+                Add symbols to your watchlist or portfolio, add a corporate
+                ledger entry, or widen a rule's scope on the Alert rules tab.
               </EmptyState>
             ) : (
-              <div className="table-scroll tall">
-                <table className="table">
-                  <thead>
-                    <tr>
-                      <th />
-                      <th>Session</th>
-                      <th>Alert</th>
-                      <th>Detail</th>
-                      <th>Source</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {alerts.triggered.map((alert) => {
-                      const unread = !alerts.read.has(alert.key);
-                      return (
-                        <ClickableRow
-                          key={alert.key}
-                          onClick={() => {
-                            alerts.markRead([alert.key]);
-                            onOpenSymbol(alert.symbol);
-                          }}
-                        >
-                          <td style={{ width: 18 }}>
-                            {unread && <span className="dot dot-eod" title="unread" />}
-                          </td>
-                          <td className="muted nowrap">{alert.session}</td>
-                          <td>
-                            <Badge tone={alert.direction === "bullish" ? "good" : alert.direction === "bearish" ? "bad" : "neutral"}>
-                              {alert.direction === "bullish" ? "▲" : alert.direction === "bearish" ? "▼" : "●"}
-                            </Badge>{" "}
-                            <strong style={{ fontWeight: unread ? 700 : 500 }}>{alert.title}</strong>
-                          </td>
-                          <td className="muted small">{alert.detail}</td>
-                          <td className="muted small nowrap">
-                            {alert.source === "price-live" ? "live LTP (unofficial)" : alert.source === "price-eod" ? "EOD close" : "EOD signal"}
-                          </td>
-                        </ClickableRow>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
+              <>
+                {corporateEvents.length > 0 && (
+                  <div className="stack-sm">
+                    <div className="row-between">
+                      <strong>Portfolio events</strong>
+                      <span className="muted small">
+                        Watchlist and holdings · ex-date in the last 3 or next 7 days
+                      </span>
+                    </div>
+                    <div className="table-scroll short">
+                      <table className="table">
+                        <thead>
+                          <tr>
+                            <th />
+                            <th>Ex-date</th>
+                            <th>Event</th>
+                            <th>Detail</th>
+                            <th>Source</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {corporateEvents.map((alert) => {
+                            const unread = !alerts.read.has(alert.key);
+                            return (
+                              <ClickableRow
+                                key={alert.key}
+                                onClick={() => {
+                                  alerts.markRead([alert.key]);
+                                  onOpenSymbol(alert.symbol);
+                                }}
+                              >
+                                <td style={{ width: 18 }}>
+                                  {unread && <span className="dot dot-eod" title="unread" />}
+                                </td>
+                                <td className="muted nowrap">{alert.session}</td>
+                                <td>
+                                  <Badge tone="info">event</Badge>{" "}
+                                  <strong style={{ fontWeight: unread ? 700 : 500 }}>{alert.title}</strong>
+                                </td>
+                                <td className="muted small">{alert.detail}</td>
+                                <td className="muted small nowrap">Corporate action</td>
+                              </ClickableRow>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )}
+
+                {ruleAlerts.length > 0 && (
+                  <div className="table-scroll tall">
+                    <table className="table">
+                      <thead>
+                        <tr>
+                          <th />
+                          <th>Session</th>
+                          <th>Alert</th>
+                          <th>Detail</th>
+                          <th>Source</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ruleAlerts.map((alert) => {
+                          const unread = !alerts.read.has(alert.key);
+                          return (
+                            <ClickableRow
+                              key={alert.key}
+                              onClick={() => {
+                                alerts.markRead([alert.key]);
+                                onOpenSymbol(alert.symbol);
+                              }}
+                            >
+                              <td style={{ width: 18 }}>
+                                {unread && <span className="dot dot-eod" title="unread" />}
+                              </td>
+                              <td className="muted nowrap">{alert.session}</td>
+                              <td>
+                                <Badge tone={alert.direction === "bullish" ? "good" : alert.direction === "bearish" ? "bad" : "neutral"}>
+                                  {alert.direction === "bullish" ? "▲" : alert.direction === "bearish" ? "▼" : "●"}
+                                </Badge>{" "}
+                                <strong style={{ fontWeight: unread ? 700 : 500 }}>{alert.title}</strong>
+                              </td>
+                              <td className="muted small">{alert.detail}</td>
+                              <td className="muted small nowrap">
+                                {alert.source === "price-live" ? "live LTP (unofficial)" : alert.source === "price-eod" ? "EOD close" : "EOD signal"}
+                              </td>
+                            </ClickableRow>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </>
             )}
           </div>
         )}

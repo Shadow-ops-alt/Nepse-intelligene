@@ -323,3 +323,90 @@ No frontend or business-logic change is allowed to be part of that migration.
 
 The Free Edition ships separately, with its own permanent provenance badge and
 its own honest capability limits. See [FREE_EDITION.md](FREE_EDITION.md).
+
+## Personal research endpoints
+
+Schema migration version 5 adds trade plans, the trade journal, the corporate
+ledger and reconciliation imports. It also adds `source`, `external_id`, `kind`
+and `notes` to `portfolio_transactions` and a unique index on `external_id`
+where it is not null, so reconciliation is idempotent. The migration is
+idempotent and preserves existing rows.
+
+All new routes accept and return camelCase JSON. Validation failures return
+`400` with `{ "error": "..." }`.
+
+### Trade plans
+
+`trade_plans` stores a symbol, side, entry, stop, one to three targets, quantity
+and optional risk/fee figures. `riskAmount`, `riskPercent` and `rewardRisk` are
+computed from the levels when the caller does not supply them.
+
+- `GET /api/trade-plans?symbol=`: `{ "plans": TradePlan[] }`
+- `POST /api/trade-plans`: `201 { "plan": TradePlan }`
+- `PATCH /api/trade-plans/:id`: `{ "plan": TradePlan }`
+- `DELETE /api/trade-plans/:id`: `{ "deleted": true }`
+
+A `TradePlan` is `{ id, symbol, side, entry, stop, targets, quantity,
+riskAmount, riskPercent, rewardRisk, fees, notes, createdAt, updatedAt }`.
+Buys require `stop < entry < every target`; sells require
+`stop > entry > every target`.
+
+### Trade journal
+
+`trade_journal` records planned and actual levels, paper trades, tags, a JSON
+snapshot, reasons and mistakes. `pnl` is `(actualExit - actualEntry) * quantity
+- fees` for a buy and the reverse for a sell. It may be supplied explicitly for
+a closed trade. With `actualExit` null the P&L stays null: no fill is invented.
+
+- `GET /api/journal?symbol=&from=&to=`: `{ "entries": JournalEntry[] }`, newest
+  first by `openedAt`
+- `POST /api/journal`: `201 { "entry": JournalEntry }`
+- `PATCH /api/journal/:id`: `{ "entry": JournalEntry }`
+- `DELETE /api/journal/:id`: `{ "deleted": true }`
+
+`from`/`to` are `YYYY-MM-DD` and filter on `openedAt`.
+
+### Reconciliation and corporate ledger
+
+- `POST /api/reconciliation/import`: body `{ "source": string, "csv": string }`.
+  Required columns are `symbol`, `side`, `quantity`, `price`, `traded_at`;
+  optional columns are `fees`, `kind`, `external_id` and `notes`. Rows with an
+  `external_id` already stored are skipped. The response is
+  `{ imported, skipped, importId }`.
+- `GET /api/reconciliation/transactions`: `{ "transactions": Transaction[] }`
+  where each row adds `source`, `externalId` and `kind` to the portfolio shape.
+- `GET /api/corporate-ledger?symbol=`: `{ "entries": CorporateLedgerEntry[] }`
+- `POST /api/corporate-ledger`: `201 { "entry": CorporateLedgerEntry }` with
+  `{ symbol, kind: dividend|bonus|right|other, exDate, amount, shares, notes }`
+- `DELETE /api/corporate-ledger/:id`: `{ "deleted": true }`
+- `GET /api/reconciliation/summary`:
+  `{ realizedPnl, unrealizedPnl, totalPnl, xirr, dividends, bonusShares,
+  rightsShares, exposure, concentration, imports }`.
+  `exposure` is `[{ symbol, marketValue, percent }]`; `concentration` is
+  `{ topSymbol, topPercent, hhi }` where `hhi` is the sum of squared market-share
+  fractions (0 to 1). `imports` is
+  `[{ id, source, importedAt, rowsCount }]`.
+
+`xirr` is the annualised decimal return (0.1 means 10%). Cash flows are buys
+negative, sells and dividends positive, with the current market value as a final
+positive flow dated today. It is null when no rate can be solved.
+
+Corporate ledger rows are informational: bonus and right share counts are
+reported but are not automatically applied to portfolio quantities or cost
+basis. Dividends feed XIRR only; they are not added to realised P&L.
+
+### Data quality
+
+- `GET /api/data-quality` returns
+  `{ generatedAt, latestSession, summary, symbols }` where `summary` is
+  `{ symbols, fresh, stale, missingSessions, quoteDiscrepancies }` and each
+  symbol row is `{ symbol, lastCandle, lastQuote, sessions, missingSessions,
+  staleDays, quoteVsCandlePercent, status }`.
+
+`staleDays` is measured from the latest stored session, never wall-clock time.
+`missingSessions` counts trading dates among the last 60 stored sessions where
+at least 60% of active symbols have a candle but this symbol does not.
+`quoteVsCandlePercent` is `(ltp - close) / close * 100`; an absolute value of
+0.5 or more is a `discrepancy`. Status is one of `fresh`, `stale`, `thin`
+(fewer than 20 stored sessions) or `discrepancy`, and rows are sorted worst
+status first.

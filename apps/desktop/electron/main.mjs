@@ -13,7 +13,14 @@ import { pipeline } from "node:stream/promises";
 import { fileURLToPath } from "node:url";
 import { createGunzip } from "node:zlib";
 import { DatabaseSync } from "node:sqlite";
-import { app, BrowserWindow, dialog } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  nativeImage,
+  Tray,
+} from "electron";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -30,6 +37,109 @@ const REQUIRED_TABLES = [
 let serverProcess = null;
 /** @type {BrowserWindow | null} */
 let window = null;
+/** @type {Tray | null} */
+let tray = null;
+
+/**
+ * Last-resort tray image. Electron only needs a real image for the tray; the
+ * packaged app does not ship build/icon.png, so a small embedded PNG keeps the
+ * tray working there as well.
+ */
+const TRAY_ICON_DATA_URL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAeElEQVR42mNgQAJc/OKv6YEZsAF6WY7VEfS2HMURlBgwe9m2/xQ7YtQBlGjWPtlPWwcQ8uGoA2juAEIWEJInJpGOOoCmDvifVjbqgFEHjDpg1AFD3AGU1oZD3wGUNskG3AEU14aUtooH3AF06R0N2f7hgPaQke0EAPlss+t2TW95AAAAAElFTkSuQmCC";
+
+/** Resolve the tray icon in dev and packaged builds, then fall back. */
+function trayImage() {
+  const candidates = app.isPackaged
+    ? [
+        join(process.resourcesPath, "app", "build", "icon.png"),
+        join(process.resourcesPath, "build", "icon.png"),
+        join(process.resourcesPath, "icon.png"),
+      ]
+    : [join(__dirname, "..", "build", "icon.png")];
+  for (const candidate of candidates) {
+    try {
+      if (!existsSync(candidate)) continue;
+      const image = nativeImage.createFromPath(candidate);
+      if (!image.isEmpty()) return image;
+    } catch (error) {
+      console.warn(`[tray] could not read ${candidate}: ${String(error)}`);
+    }
+  }
+  const fallback = nativeImage.createFromDataURL(TRAY_ICON_DATA_URL);
+  return fallback.isEmpty() ? null : fallback;
+}
+
+function showWindow() {
+  if (!window || window.isDestroyed()) {
+    void createWindow().catch((error) => {
+      console.error(`Could not reopen the window: ${String(error)}`);
+    });
+    return;
+  }
+  if (window.isMinimized()) window.restore();
+  window.show();
+  window.focus();
+}
+
+/**
+ * Tray "Check now". The alert engine lives in the renderer, so focus the
+ * window and ask it to poll immediately instead of duplicating the rules in
+ * the main process.
+ */
+function checkNow() {
+  showWindow();
+  const contents = window?.webContents;
+  if (!contents || contents.isDestroyed() || contents.isLoading()) return;
+  void contents
+    .executeJavaScript(
+      'window.dispatchEvent(new Event("nepse:check-alerts"))',
+      true,
+    )
+    .catch((error) => {
+      console.warn(`[tray] check now failed: ${String(error)}`);
+    });
+}
+
+/**
+ * A tray keeps the renderer and the child API process alive after the window
+ * is closed. Linux desktops without a status-notifier host have no tray; in
+ * that case creating the Tray throws and the app keeps the previous
+ * close-to-quit behaviour instead of hiding with no way back.
+ */
+function createTray() {
+  if (tray) return;
+  const image = trayImage();
+  if (!image) {
+    console.warn("[tray] no icon available; alerts stop when the window closes");
+    return;
+  }
+  try {
+    tray = new Tray(image);
+  } catch (error) {
+    console.warn(
+      `[tray] unavailable on this desktop; alerts stop when the window closes: ${String(error)}`,
+    );
+    tray = null;
+    return;
+  }
+  tray.setToolTip("NEPSE Terminal");
+  const menu = Menu.buildFromTemplate([
+    { label: "Open NEPSE Terminal", click: showWindow },
+    { label: "Check now", click: checkNow },
+    { type: "separator" },
+    {
+      label: "Quit",
+      click: () => {
+        app.isQuitting = true;
+        app.quit();
+      },
+    },
+  ]);
+  tray.setContextMenu(menu);
+  tray.on("click", showWindow);
+  tray.on("double-click", showWindow);
+}
 
 /** Where the compressed starter database travels with the app. */
 function starterDatabasePath() {
@@ -210,6 +320,8 @@ async function createWindow() {
       contextIsolation: true,
       sandbox: true,
       nodeIntegration: false,
+      // Hidden windows must keep polling so tray alerts fire on schedule.
+      backgroundThrottling: false,
     },
   });
 
@@ -222,6 +334,14 @@ async function createWindow() {
       );
     },
   );
+  window.on("close", (event) => {
+    // Closing hides to the tray instead of quitting, so the alert engine and
+    // the child API process keep running. Without a tray there is no way to
+    // reopen the window, so let the close through.
+    if (app.isQuitting || !tray) return;
+    event.preventDefault();
+    window?.hide();
+  });
   window.on("closed", () => {
     window = null;
   });
@@ -232,6 +352,7 @@ async function createWindow() {
 async function startApp() {
   await prepareDatabase();
   await createWindow();
+  createTray();
 }
 
 app.whenReady().then(startApp).catch(async (error) => {
@@ -246,17 +367,27 @@ app.whenReady().then(startApp).catch(async (error) => {
 });
 
 app.on("activate", () => {
+  if (window && !window.isDestroyed()) {
+    showWindow();
+    return;
+  }
   if (BrowserWindow.getAllWindows().length === 0) {
     void createWindow();
   }
 });
 
 app.on("window-all-closed", () => {
-  if (process.platform !== "darwin") app.quit();
+  // With a tray the app and its API stay alive so alerts keep firing. Without
+  // a tray (some Linux desktops) there is no way back, so quit as before.
+  if (!tray) app.quit();
 });
 
 app.on("before-quit", () => {
   app.isQuitting = true;
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
   if (serverProcess) {
     serverProcess.kill("SIGTERM");
     serverProcess = null;

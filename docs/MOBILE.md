@@ -63,9 +63,25 @@ Use a viewport of 360-430 CSS pixels wide (390x844 is the reference size).
 - The top bar, breadcrumbs, action buttons, segmented controls and cards wrap
   or stack instead of widening the page.
 - Charts fill the card width and keep a usable height.
+- The intraday chart is usable at 360-430px: the 1m, 2m, 3m, 5m, 10m, 15m,
+  30m and 1h intervals all render, and the indicator toolbar scrolls
+  horizontally inside its own row instead of widening the page. The indicator
+  legend wraps. SMA 9/21, EMA 9/21, VWAP, Bollinger 20/2, RSI 14 and MACD
+  12/26/9 toggles all work with a tap.
+- RSI and MACD panes stay readable at phone height; the price pane keeps most
+  of the chart and the oscillators share the remainder.
+- The Alerts page shows the mobile notice: alerts run only while the page is
+  open, and stop when the tab or PWA is closed.
 - Nothing important is hidden behind a notch or the mobile browser chrome
   (`viewport-fit=cover` and safe-area padding are applied).
 - Tap targets work and charts redraw on rotation.
+
+### Alerts on mobile
+
+The desktop tray does not exist in the PWA. Alerts are evaluated by a renderer
+timer every five minutes while the page is open. Closing the tab, backgrounding
+the browser, or closing the installed PWA stops them. There is no push
+subscription and no background sync. The Alerts page says this explicitly.
 
 A quick programmatic check in the browser console:
 
@@ -103,11 +119,14 @@ There is no TLS server in this change.
 
 - Plain LAN HTTP is fine for layout and functional testing, but no service
   worker, no offline shell and no install prompt without a secure context.
+- The mobile product is the free PWA. There is no separate mobile binary.
 - The service worker is registered only in production builds, so the Vite dev
   server never registers one.
 - This does not produce an Android APK. A native APK needs the Android SDK,
   a Gradle project (for example Capacitor or a Trusted Web Activity wrapper)
   and signing. That work is not part of this change; the phone experience here
   is the installable web app plus LAN testing.
+- Alerts do not run in the background on a phone. They are evaluated only while
+  the PWA or browser tab is open, as described in `docs/ALERTS.md`.
 - The API remains single-user and unauthenticated by design. Do not expose it
   beyond a trusted local network.

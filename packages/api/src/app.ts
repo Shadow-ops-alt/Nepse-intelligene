@@ -22,11 +22,21 @@ import {
   type MarketDataProvider,
 } from "@stock/core";
 import { createProvider, PERSONAL_PROVIDER_ID } from "@stock/providers";
-import { PersonalStore, type StoredProvenance } from "@stock/store";
+import {
+  PersonalStore,
+  type CorporateLedgerKind,
+  type JournalInput,
+  type JournalPatch,
+  type NewPortfolioTransaction,
+  type StoredProvenance,
+  type TradePlanInput,
+  type TradePlanPatch,
+} from "@stock/store";
 import {
   analyzeCandles,
   computePortfolio,
   screenCandles,
+  xirr,
   type ScreenerRow,
   type SignalEvent,
   type TradeInput,
@@ -82,13 +92,16 @@ function sendJson(
   response.end(payload);
 }
 
-function readBody(request: IncomingMessage): Promise<Record<string, unknown>> {
+function readBody(
+  request: IncomingMessage,
+  maxBytes = 64 * 1024,
+): Promise<Record<string, unknown>> {
   return new Promise((resolveBody, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     request.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > 64 * 1024) {
+      if (size > maxBytes) {
         reject(new Error("request body too large"));
         request.destroy();
         return;
@@ -215,6 +228,11 @@ function rejectUnsafeRequest(request: IncomingMessage): string | null {
       }
     }
     const type = String(request.headers["content-type"] ?? "").toLowerCase();
+    // A cross-site form cannot issue DELETE (it is not a simple method and a
+    // fetch would need a preflight), so a bodyless same-origin DELETE is safe.
+    if (request.method === "DELETE" && type === "") {
+      return null;
+    }
     if (!type.startsWith("application/json")) {
       return "state-changing requests must send content-type: application/json";
     }
@@ -518,6 +536,208 @@ function integerParam(
   const parsed = Number(value);
   if (!Number.isInteger(parsed)) return null;
   return Math.min(max, Math.max(min, parsed));
+}
+
+function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function bodyNumber(value: unknown): number {
+  if (value === null || value === undefined || value === "") return Number.NaN;
+  return Number(value);
+}
+
+/** `undefined` when absent, `null` when explicitly null/blank, else a number. */
+function bodyOptionalNumber(value: unknown): number | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  return Number(value);
+}
+
+function bodyTargets(value: unknown): number[] {
+  return Array.isArray(value)
+    ? value.map((target) => Number(target))
+    : (value as number[]);
+}
+
+function bodyText(value: unknown): string | null {
+  if (value === undefined || value === null) return null;
+  const text = String(value).trim();
+  return text === "" ? null : text;
+}
+
+function planInputFromBody(body: Record<string, unknown>): TradePlanInput {
+  return {
+    symbol: String(body.symbol ?? ""),
+    side: String(body.side ?? "").toLowerCase() as TradePlanInput["side"],
+    entry: bodyNumber(body.entry),
+    stop: bodyNumber(body.stop),
+    targets: bodyTargets(body.targets),
+    quantity: bodyNumber(body.quantity),
+    riskAmount: bodyOptionalNumber(body.riskAmount),
+    riskPercent: bodyOptionalNumber(body.riskPercent),
+    rewardRisk: bodyOptionalNumber(body.rewardRisk),
+    fees: bodyOptionalNumber(body.fees),
+    notes: bodyText(body.notes),
+  };
+}
+
+function planPatchFromBody(body: Record<string, unknown>): TradePlanPatch {
+  const patch: TradePlanPatch = {};
+  if ("symbol" in body) patch.symbol = String(body.symbol ?? "");
+  if ("side" in body) {
+    patch.side = String(body.side ?? "").toLowerCase() as TradePlanInput["side"];
+  }
+  if ("entry" in body) patch.entry = bodyNumber(body.entry);
+  if ("stop" in body) patch.stop = bodyNumber(body.stop);
+  if ("targets" in body) patch.targets = bodyTargets(body.targets);
+  if ("quantity" in body) patch.quantity = bodyNumber(body.quantity);
+  if ("riskAmount" in body) patch.riskAmount = bodyOptionalNumber(body.riskAmount);
+  if ("riskPercent" in body) {
+    patch.riskPercent = bodyOptionalNumber(body.riskPercent);
+  }
+  if ("rewardRisk" in body) {
+    patch.rewardRisk = bodyOptionalNumber(body.rewardRisk);
+  }
+  if ("fees" in body) patch.fees = bodyOptionalNumber(body.fees);
+  if ("notes" in body) patch.notes = bodyText(body.notes);
+  return patch;
+}
+
+function journalInputFromBody(body: Record<string, unknown>): JournalInput {
+  return {
+    planId:
+      body.planId === undefined || body.planId === null
+        ? null
+        : bodyNumber(body.planId),
+    symbol: String(body.symbol ?? ""),
+    side: String(body.side ?? "").toLowerCase() as JournalInput["side"],
+    paper: body.paper === true,
+    plannedEntry: bodyOptionalNumber(body.plannedEntry) ?? null,
+    plannedStop: bodyOptionalNumber(body.plannedStop) ?? null,
+    plannedTarget: bodyOptionalNumber(body.plannedTarget) ?? null,
+    actualEntry: bodyOptionalNumber(body.actualEntry) ?? null,
+    actualExit: bodyOptionalNumber(body.actualExit) ?? null,
+    quantity: bodyOptionalNumber(body.quantity) ?? null,
+    fees: bodyOptionalNumber(body.fees) ?? null,
+    pnl: bodyOptionalNumber(body.pnl) ?? null,
+    reason: bodyText(body.reason),
+    mistakes: bodyText(body.mistakes),
+    tags: Array.isArray(body.tags)
+      ? body.tags.map((tag) => String(tag))
+      : (body.tags as string[] | undefined),
+    snapshot: body.snapshot,
+    openedAt: bodyText(body.openedAt),
+    closedAt: bodyText(body.closedAt),
+  };
+}
+
+function journalPatchFromBody(body: Record<string, unknown>): JournalPatch {
+  const patch: JournalPatch = {};
+  if ("planId" in body) patch.planId = bodyOptionalNumber(body.planId) ?? null;
+  if ("symbol" in body) patch.symbol = String(body.symbol ?? "");
+  if ("side" in body) {
+    patch.side = String(body.side ?? "").toLowerCase() as JournalInput["side"];
+  }
+  if ("paper" in body) patch.paper = body.paper === true;
+  if ("plannedEntry" in body) {
+    patch.plannedEntry = bodyOptionalNumber(body.plannedEntry) ?? null;
+  }
+  if ("plannedStop" in body) {
+    patch.plannedStop = bodyOptionalNumber(body.plannedStop) ?? null;
+  }
+  if ("plannedTarget" in body) {
+    patch.plannedTarget = bodyOptionalNumber(body.plannedTarget) ?? null;
+  }
+  if ("actualEntry" in body) {
+    patch.actualEntry = bodyOptionalNumber(body.actualEntry) ?? null;
+  }
+  if ("actualExit" in body) {
+    patch.actualExit = bodyOptionalNumber(body.actualExit) ?? null;
+  }
+  if ("quantity" in body) {
+    patch.quantity = bodyOptionalNumber(body.quantity) ?? null;
+  }
+  if ("fees" in body) patch.fees = bodyOptionalNumber(body.fees) ?? null;
+  if ("pnl" in body) patch.pnl = bodyOptionalNumber(body.pnl) ?? null;
+  if ("reason" in body) patch.reason = bodyText(body.reason);
+  if ("mistakes" in body) patch.mistakes = bodyText(body.mistakes);
+  if ("tags" in body) {
+    patch.tags = Array.isArray(body.tags)
+      ? body.tags.map((tag) => String(tag))
+      : (body.tags as string[]);
+  }
+  if ("snapshot" in body) patch.snapshot = body.snapshot;
+  if ("openedAt" in body) patch.openedAt = bodyText(body.openedAt);
+  if ("closedAt" in body) patch.closedAt = bodyText(body.closedAt);
+  return patch;
+}
+
+/** Broker CSV rows for reconciliation; throws with the row number on error. */
+function parseReconciliationRows(csv: string): NewPortfolioTransaction[] {
+  const rows: NewPortfolioTransaction[] = [];
+  parseCsvRecords(csv).forEach((record, index) => {
+    const line = index + 2;
+    const symbol = String(record.symbol ?? "").trim().toUpperCase();
+    if (!symbol) throw new Error(`row ${line}: symbol is required`);
+    const side = String(record.side ?? "").trim().toLowerCase();
+    if (side !== "buy" && side !== "sell") {
+      throw new Error(`row ${line}: side must be buy or sell`);
+    }
+    const quantity = Number(record.quantity);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      throw new Error(`row ${line}: quantity must be positive`);
+    }
+    // A short or blank price cell must not be read as "free": Number("") is 0.
+    const rawPrice = record.price;
+    if (rawPrice === undefined || String(rawPrice).trim() === "") {
+      throw new Error(`row ${line}: price is required`);
+    }
+    const price = Number(rawPrice);
+    if (!Number.isFinite(price) || price < 0) {
+      throw new Error(`row ${line}: price must be zero or positive`);
+    }
+    const tradedAt = String(record.traded_at ?? record.tradedAt ?? "").trim();
+    if (!/^\d{4}-\d{2}-\d{2}/.test(tradedAt)) {
+      throw new Error(`row ${line}: traded_at must start with YYYY-MM-DD`);
+    }
+    const rawFees = record.fees;
+    const fees =
+      rawFees === undefined || String(rawFees).trim() === ""
+        ? 0
+        : Number(rawFees);
+    if (!Number.isFinite(fees) || fees < 0) {
+      throw new Error(`row ${line}: fees must be zero or positive`);
+    }
+    rows.push({
+      symbol,
+      side,
+      quantity,
+      price,
+      fees,
+      tradedAt,
+      kind: optionalText(record.kind) ?? "trade",
+      externalId: optionalText(record.external_id ?? record.externalId),
+      notes: optionalText(record.notes),
+    });
+  });
+  return rows;
+}
+
+function roundTo(value: number, digits = 2): number {
+  const factor = 10 ** digits;
+  return Math.round(value * factor) / factor;
+}
+
+/**
+ * Nepal Time calendar date. Ex-dates are exchange dates, so "today" must be the
+ * NPT day, not the UTC day, or a dividend is excluded for the 5h45m after NPT
+ * midnight.
+ */
+function nptDate(now = new Date()): string {
+  return new Date(now.getTime() + (5 * 60 + 45) * 60_000)
+    .toISOString()
+    .slice(0, 10);
 }
 
 export function createApiServer(config: ApiConfig): ApiHandle {
@@ -2150,6 +2370,484 @@ export function createApiServer(config: ApiConfig): ApiHandle {
             store.addToWatchlist(symbol);
           }
           sendJson(response, 200, { symbols: store.getWatchlist() });
+          return;
+        }
+
+        // --- trade plans -------------------------------------------------
+        const tradePlanMatch = /^\/api\/trade-plans(?:\/(\d+))?$/.exec(
+          url.pathname,
+        );
+        if (tradePlanMatch) {
+          const idText = tradePlanMatch[1];
+          if (idText === undefined) {
+            if (request.method === "GET") {
+              try {
+                const symbol = url.searchParams.get("symbol") ?? undefined;
+                sendJson(response, 200, {
+                  plans: store.getTradePlans(symbol),
+                });
+              } catch (error) {
+                sendJson(response, 400, { error: errorText(error) });
+              }
+              return;
+            }
+            if (request.method === "POST") {
+              const body = await readBody(request);
+              try {
+                const plan = store.addTradePlan(planInputFromBody(body));
+                sendJson(response, 201, { plan });
+              } catch (error) {
+                sendJson(response, 400, { error: errorText(error) });
+              }
+              return;
+            }
+          } else {
+            const id = Number(idText);
+            if (request.method === "PATCH") {
+              const body = await readBody(request);
+              try {
+                const plan = store.updateTradePlan(id, planPatchFromBody(body));
+                if (!plan) {
+                  sendJson(response, 404, { error: "not found" });
+                  return;
+                }
+                sendJson(response, 200, { plan });
+              } catch (error) {
+                sendJson(response, 400, { error: errorText(error) });
+              }
+              return;
+            }
+            if (request.method === "DELETE") {
+              if (!store.removeTradePlan(id)) {
+                sendJson(response, 404, { error: "not found" });
+                return;
+              }
+              sendJson(response, 200, { deleted: true });
+              return;
+            }
+          }
+          sendJson(response, 405, { error: "method not allowed" });
+          return;
+        }
+
+        // --- trade journal ----------------------------------------------
+        const journalMatch = /^\/api\/journal(?:\/(\d+))?$/.exec(url.pathname);
+        if (journalMatch) {
+          const idText = journalMatch[1];
+          if (idText === undefined) {
+            if (request.method === "GET") {
+              try {
+                const symbol = url.searchParams.get("symbol") ?? undefined;
+                const from = url.searchParams.get("from") ?? undefined;
+                const to = url.searchParams.get("to") ?? undefined;
+                sendJson(response, 200, {
+                  entries: store.getJournalEntries({ symbol, from, to }),
+                });
+              } catch (error) {
+                sendJson(response, 400, { error: errorText(error) });
+              }
+              return;
+            }
+            if (request.method === "POST") {
+              const body = await readBody(request);
+              try {
+                const entry = store.addJournalEntry(
+                  journalInputFromBody(body),
+                );
+                sendJson(response, 201, { entry });
+              } catch (error) {
+                sendJson(response, 400, { error: errorText(error) });
+              }
+              return;
+            }
+          } else {
+            const id = Number(idText);
+            if (request.method === "PATCH") {
+              const body = await readBody(request);
+              try {
+                const entry = store.updateJournalEntry(
+                  id,
+                  journalPatchFromBody(body),
+                );
+                if (!entry) {
+                  sendJson(response, 404, { error: "not found" });
+                  return;
+                }
+                sendJson(response, 200, { entry });
+              } catch (error) {
+                sendJson(response, 400, { error: errorText(error) });
+              }
+              return;
+            }
+            if (request.method === "DELETE") {
+              if (!store.removeJournalEntry(id)) {
+                sendJson(response, 404, { error: "not found" });
+                return;
+              }
+              sendJson(response, 200, { deleted: true });
+              return;
+            }
+          }
+          sendJson(response, 405, { error: "method not allowed" });
+          return;
+        }
+
+        // --- corporate ledger -------------------------------------------
+        const ledgerMatch = /^\/api\/corporate-ledger(?:\/(\d+))?$/.exec(
+          url.pathname,
+        );
+        if (ledgerMatch) {
+          const idText = ledgerMatch[1];
+          if (idText === undefined && request.method === "GET") {
+            try {
+              const symbol = url.searchParams.get("symbol") ?? undefined;
+              sendJson(response, 200, {
+                entries: store.getCorporateLedger(symbol),
+              });
+            } catch (error) {
+              sendJson(response, 400, { error: errorText(error) });
+            }
+            return;
+          }
+          if (idText === undefined && request.method === "POST") {
+            const body = await readBody(request);
+            try {
+              const entry = store.addCorporateLedgerEntry({
+                symbol: String(body.symbol ?? ""),
+                kind: String(body.kind ?? "").toLowerCase() as CorporateLedgerKind,
+                exDate: bodyText(body.exDate ?? body.ex_date),
+                amount: bodyOptionalNumber(body.amount) ?? null,
+                shares: bodyOptionalNumber(body.shares) ?? null,
+                notes: bodyText(body.notes),
+              });
+              sendJson(response, 201, { entry });
+            } catch (error) {
+              sendJson(response, 400, { error: errorText(error) });
+            }
+            return;
+          }
+          if (idText !== undefined && request.method === "DELETE") {
+            if (!store.removeCorporateLedgerEntry(Number(idText))) {
+              sendJson(response, 404, { error: "not found" });
+              return;
+            }
+            sendJson(response, 200, { deleted: true });
+            return;
+          }
+          sendJson(response, 405, { error: "method not allowed" });
+          return;
+        }
+
+        // --- reconciliation ---------------------------------------------
+        if (
+          request.method === "POST" &&
+          url.pathname === "/api/reconciliation/import"
+        ) {
+          const body = await readBody(request, 8 * 1024 * 1024);
+          const source = String(body.source ?? "").trim();
+          if (!source) {
+            sendJson(response, 400, { error: "source is required" });
+            return;
+          }
+          const csv = typeof body.csv === "string" ? body.csv : "";
+          if (csv.trim() === "") {
+            sendJson(response, 400, { error: "csv is required" });
+            return;
+          }
+          try {
+            const rows = parseReconciliationRows(csv);
+            const result = store.importReconciliation(source, rows);
+            sendJson(response, 200, result);
+          } catch (error) {
+            sendJson(response, 400, { error: errorText(error) });
+          }
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/reconciliation/transactions"
+        ) {
+          sendJson(response, 200, {
+            transactions: store.getReconciliationTransactions(),
+          });
+          return;
+        }
+
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/reconciliation/summary"
+        ) {
+          const transactions = store.getPortfolioTransactions();
+          const priceBySymbol = new Map<
+            string,
+            { symbol: string; price: number; asOf: string | null }
+          >(
+            store.getQuotes(providerId).map((quote) => [
+              quote.symbol.toUpperCase(),
+              {
+                symbol: quote.symbol,
+                price: quote.ltp,
+                asOf: quote.asOf ?? null,
+              },
+            ]),
+          );
+          for (const symbol of new Set(
+            transactions.map((transaction) => transaction.symbol),
+          )) {
+            if (priceBySymbol.has(symbol)) continue;
+            const latest = store.getLatestCandleWithProvenance(
+              providerId,
+              symbol,
+            );
+            if (!latest) continue;
+            priceBySymbol.set(symbol, {
+              symbol,
+              price: latest.data.close,
+              asOf: latest.data.timestamp,
+            });
+          }
+
+          const portfolio = computePortfolio(
+            transactions.map(
+              (transaction): TradeInput => ({
+                symbol: transaction.symbol,
+                side: transaction.side,
+                quantity: transaction.quantity,
+                price: transaction.price,
+                fees: transaction.fees,
+                tradedAt: transaction.tradedAt,
+              }),
+            ),
+            [...priceBySymbol.values()],
+          );
+
+          const ledger = store.getCorporateLedger();
+          let dividends = 0;
+          let bonusShares = 0;
+          let rightsShares = 0;
+          const flows: Array<{ date: string; amount: number }> = [];
+          const today = nptDate();
+          for (const transaction of transactions) {
+            const gross = transaction.quantity * transaction.price;
+            flows.push({
+              date: transaction.tradedAt.slice(0, 10),
+              amount:
+                transaction.side === "buy"
+                  ? -(gross + transaction.fees)
+                  : gross - transaction.fees,
+            });
+          }
+          for (const entry of ledger) {
+            if (entry.kind === "dividend") {
+              // A dividend with a future ex-date has not been received yet:
+              // keep it in the ledger, but do not count it as cash or a flow.
+              const date = (entry.exDate ?? entry.createdAt).slice(0, 10);
+              if (date <= today) {
+                dividends += entry.amount ?? 0;
+                if (entry.amount !== null) {
+                  flows.push({ date, amount: entry.amount });
+                }
+              }
+            } else if (entry.kind === "bonus") {
+              bonusShares += entry.shares ?? 0;
+            } else if (entry.kind === "right") {
+              rightsShares += entry.shares ?? 0;
+            }
+          }
+
+          const totalMarketValue = portfolio.totals.marketValue;
+          if (totalMarketValue > 0) {
+            flows.push({
+              date: today,
+              amount: totalMarketValue,
+            });
+          }
+
+          const exposure = portfolio.positions
+            .filter(
+              (position) =>
+                position.quantity > 0 &&
+                position.marketValue !== null &&
+                position.marketValue > 0,
+            )
+            .map((position) => ({
+              symbol: position.symbol,
+              marketValue: position.marketValue!,
+              percent:
+                totalMarketValue > 0
+                  ? roundTo(
+                      (position.marketValue! / totalMarketValue) * 100,
+                      4,
+                    )
+                  : 0,
+            }))
+            .sort(
+              (a, b) =>
+                b.marketValue - a.marketValue ||
+                a.symbol.localeCompare(b.symbol),
+            );
+
+          const top = exposure[0] ?? null;
+          const hhi =
+            totalMarketValue > 0
+              ? exposure.reduce(
+                  (sum, row) =>
+                    sum + (row.marketValue / totalMarketValue) ** 2,
+                  0,
+                )
+              : 0;
+
+          sendJson(response, 200, {
+            realizedPnl: portfolio.totals.realizedPnl,
+            unrealizedPnl: portfolio.totals.unrealizedPnl,
+            totalPnl: portfolio.totals.totalPnl,
+            xirr: xirr(flows),
+            dividends: roundTo(dividends, 2),
+            bonusShares: roundTo(bonusShares, 4),
+            rightsShares: roundTo(rightsShares, 4),
+            exposure,
+            concentration: {
+              topSymbol: top?.symbol ?? null,
+              topPercent: top?.percent ?? 0,
+              hhi: roundTo(hhi, 4),
+            },
+            imports: store.listReconciliationImports().map((entry) => ({
+              id: entry.id,
+              source: entry.source,
+              importedAt: entry.importedAt,
+              rowsCount: entry.rowsCount,
+            })),
+          });
+          return;
+        }
+
+        // --- data quality -----------------------------------------------
+        if (request.method === "GET" && url.pathname === "/api/data-quality") {
+          const index = store.getCandleSessionIndex(providerId);
+          const quoteBySymbol = new Map(
+            store
+              .getQuotes(providerId)
+              .map((quote) => [quote.symbol.toUpperCase(), quote]),
+          );
+
+          const bySymbol = new Map<
+            string,
+            Array<{ session: string; timestamp: string; close: number }>
+          >();
+          const sessionSymbols = new Map<string, Set<string>>();
+          for (const row of index.rows) {
+            const entries = bySymbol.get(row.symbol) ?? [];
+            entries.push({
+              session: row.session,
+              timestamp: row.timestamp,
+              close: row.close,
+            });
+            bySymbol.set(row.symbol, entries);
+            const symbols = sessionSymbols.get(row.session) ?? new Set<string>();
+            symbols.add(row.symbol);
+            sessionSymbols.set(row.session, symbols);
+          }
+
+          const symbolCount = bySymbol.size;
+          const marketSessions =
+            symbolCount === 0
+              ? []
+              : index.sessions.filter(
+                  (session) =>
+                    (sessionSymbols.get(session)?.size ?? 0) / symbolCount >=
+                    0.6,
+                );
+          // The latest *market* session, not the latest session any single
+          // symbol has a row for: one stray or future-dated candle must not
+          // mark the whole market stale.
+          const latestSession = marketSessions.at(-1) ?? null;
+
+          type QualityStatus = "fresh" | "stale" | "thin" | "discrepancy";
+          const ranked: Array<{ status: QualityStatus; sort: number }> = [
+            { status: "discrepancy", sort: 0 },
+            { status: "stale", sort: 1 },
+            { status: "thin", sort: 2 },
+            { status: "fresh", sort: 3 },
+          ];
+          const statusRank = new Map(
+            ranked.map((entry) => [entry.status, entry.sort]),
+          );
+
+          const symbols = [...bySymbol.entries()]
+            .map(([symbol, candles]) => {
+              const last = candles[candles.length - 1]!;
+              const sessions = new Set(candles.map((candle) => candle.session));
+              const missingSessions = marketSessions.filter(
+                (session) => !sessions.has(session),
+              ).length;
+              const staleDays =
+                latestSession === null
+                  ? 0
+                  : Math.max(
+                      0,
+                      Math.round(
+                        (Date.parse(`${latestSession}T00:00:00Z`) -
+                          Date.parse(`${last.session}T00:00:00Z`)) /
+                          86_400_000,
+                      ),
+                    );
+              const quote = quoteBySymbol.get(symbol);
+              const lastQuote =
+                quote && Number.isFinite(quote.ltp) ? quote.ltp : null;
+              const quoteVsCandlePercent =
+                lastQuote === null || last.close <= 0
+                  ? null
+                  : roundTo(((lastQuote - last.close) / last.close) * 100, 4);
+
+              let status: QualityStatus;
+              if (
+                quoteVsCandlePercent !== null &&
+                Math.abs(quoteVsCandlePercent) >= 0.5
+              ) {
+                status = "discrepancy";
+              } else if (staleDays > 0) {
+                status = "stale";
+              } else if (sessions.size < 20) {
+                status = "thin";
+              } else {
+                status = "fresh";
+              }
+
+              return {
+                symbol,
+                lastCandle: last.close,
+                lastQuote,
+                sessions: sessions.size,
+                missingSessions,
+                staleDays,
+                quoteVsCandlePercent,
+                status,
+              };
+            })
+            .sort(
+              (a, b) =>
+                statusRank.get(a.status)! - statusRank.get(b.status)! ||
+                a.symbol.localeCompare(b.symbol),
+            );
+
+          sendJson(response, 200, {
+            generatedAt: new Date().toISOString(),
+            latestSession,
+            summary: {
+              symbols: symbols.length,
+              fresh: symbols.filter((row) => row.status === "fresh").length,
+              stale: symbols.filter((row) => row.status === "stale").length,
+              missingSessions: symbols.reduce(
+                (sum, row) => sum + row.missingSessions,
+                0,
+              ),
+              quoteDiscrepancies: symbols.filter(
+                (row) => row.status === "discrepancy",
+              ).length,
+            },
+            symbols,
+          });
           return;
         }
 

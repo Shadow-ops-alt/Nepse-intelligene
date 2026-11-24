@@ -2932,3 +2932,105 @@ details.card-footer[open] > summary {
     word-break: break-word;
   }
 }
+
+/* ------------------------------------------------------------------ trading workflow
+   Plans, journal, reconciliation and data quality. Everything below relies on
+   the existing stack / card / table primitives; these are the few additions. */
+
+.span-full {
+  grid-column: 1 / -1;
+}
+
+/* A labelled non-input control (segmented switch) inside a form grid. */
+.field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+textarea {
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  background: var(--surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  min-width: 0;
+  max-width: 100%;
+  resize: vertical;
+}
+
+textarea:hover {
+  border-color: var(--text-subtle);
+}
+
+textarea::placeholder {
+  color: var(--text-subtle);
+}
+
+input[type="file"] {
+  max-width: 100%;
+  font-size: 12px;
+}
+
+/* The prepared order is plain text, so it wraps rather than widening the page. */
+.order-sheet {
+  margin: 0;
+  padding: 12px;
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.stat-text {
+  display: inline-block;
+  white-space: normal;
+  font-size: 13px;
+  line-height: 1.35;
+}
+
+@media (max-width: 500px) {
+  .stats-row {
+    grid-template-columns: repeat(auto-fit, minmax(128px, 1fr));
+  }
+
+  .order-sheet {
+    font-size: 11.5px;
+  }
+
+  .filters {
+    gap: 10px;
+  }
+
+  .filters label,
+  .filters label.grow {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .filters .form-actions {
+    width: 100%;
+  }
+
+  .card-actions input[type="search"] {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .table-scroll {
+    max-height: 70dvh;
+  }
+}
