@@ -13,6 +13,7 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketTimeoutException;
@@ -32,12 +33,19 @@ import java.util.regex.Pattern;
  *
  * It serves the Vite build from APK assets, the precomputed data pack from
  * APK assets or filesDir, and a small JSON API backed by filesDir for the
- * personal tools. The server binds to 127.0.0.1 with an ephemeral port and
- * rejects any request whose Host or Origin is not the loopback address.
+ * personal tools. The server binds to 127.0.0.1 and rejects any request whose
+ * Host or Origin is not the loopback address.
+ *
+ * It prefers the fixed loopback port {@link #PREFERRED_PORT} so the WebView
+ * origin stays the same across launches. Supabase Auth stores its session in
+ * origin-scoped WebView localStorage, so a stable origin lets a signed-in
+ * session survive a cold restart. If the port is taken the server falls back
+ * to an ephemeral port and the app keeps working in a fresh origin.
  */
 public final class LocalServer {
 
     private static final String TAG = "NepseLocalServer";
+    private static final int PREFERRED_PORT = 41731;
     private static final int MAX_BODY_BYTES = 16 * 1024 * 1024;
     private static final Pattern TRADE_PLAN_ID = Pattern.compile("^/api/trade-plans/(\\d+)$");
     private static final Pattern JOURNAL_ID = Pattern.compile("^/api/journal/(\\d+)$");
@@ -69,7 +77,17 @@ public final class LocalServer {
 
     public synchronized void start() throws IOException {
         if (running) return;
-        serverSocket = new ServerSocket(0, 64, InetAddress.getByName("127.0.0.1"));
+        boolean fixed = true;
+        ServerSocket socket;
+        try {
+            socket = bind(PREFERRED_PORT);
+        } catch (IOException busy) {
+            fixed = false;
+            Log.w(TAG, "fixed port " + PREFERRED_PORT + " is unavailable ("
+                    + busy.getMessage() + "); falling back to an ephemeral port");
+            socket = bind(0);
+        }
+        serverSocket = socket;
         port = serverSocket.getLocalPort();
         running = true;
         Thread accept = new Thread(new Runnable() {
@@ -80,7 +98,15 @@ public final class LocalServer {
         }, "nepse-http-accept");
         accept.setDaemon(true);
         accept.start();
-        Log.i(TAG, "local server listening on " + url());
+        Log.i(TAG, "local server listening on " + url()
+                + (fixed ? " (fixed port, sessions persist)" : " (ephemeral fallback)"));
+    }
+
+    private static ServerSocket bind(int localPort) throws IOException {
+        ServerSocket socket = new ServerSocket();
+        socket.setReuseAddress(true);
+        socket.bind(new InetSocketAddress(InetAddress.getByName("127.0.0.1"), localPort), 64);
+        return socket;
     }
 
     public synchronized void stop() {
@@ -181,6 +207,13 @@ public final class LocalServer {
             String path = URLDecoder.decode(rawPath, "UTF-8");
             Map<String, String> query = parseQuery(rawQuery);
             boolean head = method.equals("HEAD");
+
+            // The web UI fetches this at startup. Absent config means offline
+            // mode, so answer 404 instead of falling through to the SPA shell.
+            if (path.equals("/hosted-config.json")) {
+                serveHostedConfig(out, method, head);
+                return;
+            }
 
             if (path.startsWith("/api/")) {
                 JSONObject parsedBody = null;
@@ -743,6 +776,22 @@ public final class LocalServer {
         } catch (Exception error) {
             return null;
         }
+    }
+
+    // ------------------------------------------------------- hosted config
+
+    private void serveHostedConfig(OutputStream out, String method, boolean head)
+            throws IOException {
+        if (!method.equals("GET") && !method.equals("HEAD")) {
+            sendJson(out, 405, errorJson("method not allowed"));
+            return;
+        }
+        byte[] bytes = HostedConfig.readBytes(context);
+        if (bytes == null) {
+            sendJson(out, 404, errorJson("hosted config is not installed"));
+            return;
+        }
+        writeBytes(out, 200, "application/json", bytes, head, false);
     }
 
     // --------------------------------------------------------------- static

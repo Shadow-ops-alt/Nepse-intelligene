@@ -23,8 +23,8 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_NAME="NEPSE-Terminal"
-VERSION_NAME="0.5.0"
-VERSION_CODE=500
+VERSION_NAME="0.6.0"
+VERSION_CODE="600"
 MIN_SDK=26
 TARGET_SDK=35
 BUILD_TOOLS_VERSION="${BUILD_TOOLS_VERSION:-35.0.0}"
@@ -113,6 +113,17 @@ if [ ! -f "$ASSETS/mobile/mobile.js" ] || [ ! -f "$ASSETS/mobile/mobile.css" ]; 
     exit 1
 fi
 
+# Optional Supabase-hosted config. The real file is gitignored and may be
+# absent; aapt2 link -A bundles every file under $ASSETS, so when it exists it
+# lands at assets/mobile/hosted-config.json in the APK and LocalServer serves
+# it at /hosted-config.json. The verification step below asserts this.
+HOSTED_CONFIG="$ASSETS/mobile/hosted-config.json"
+if [ -f "$HOSTED_CONFIG" ]; then
+    echo "==> hosted config: bundling assets/mobile/hosted-config.json"
+else
+    echo "==> hosted config: none (offline-only build)"
+fi
+
 echo "==> stage web assets"
 rm -rf "$WEB_ASSETS"
 mkdir -p "$WEB_ASSETS"
@@ -145,6 +156,20 @@ echo "==> aapt2 link"
     --version-name "$VERSION_NAME" \
     --replace-version \
     "$BUILD/resources.zip"
+
+# Confirm the optional config was packaged. Absent config is a valid build.
+if [ -f "$HOSTED_CONFIG" ]; then
+    python3 -I - "$BUILD/unsigned.apk" <<'PY'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1]) as apk:
+    names = set(apk.namelist())
+if "assets/mobile/hosted-config.json" not in names:
+    raise SystemExit("ERROR: hosted-config.json is present in assets but was not packaged")
+print("    hosted config verified in APK")
+PY
+fi
 
 # ------------------------------------------------------------- compile -----
 echo "==> javac"

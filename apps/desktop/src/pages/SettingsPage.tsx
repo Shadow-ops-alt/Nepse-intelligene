@@ -1,5 +1,6 @@
 import { useTheme, type ThemeMode } from "../theme";
 import { useApi } from "../hooks";
+import { useHostedAuth } from "../hosted/auth";
 import type { ImportStatus, Meta } from "../types";
 import {
   AsOf,
@@ -29,6 +30,7 @@ export function SettingsPage({
   onOpenData: () => void;
 }) {
   const { mode, resolved, setMode } = useTheme();
+  const auth = useHostedAuth();
   const importState = useApi<ImportStatus>("/api/import/status");
   const dataDir = importState.data?.dataDir;
 
@@ -52,6 +54,34 @@ export function SettingsPage({
           hint={<AsOf value={meta.dataState.lastAsOf} />}
         />
       </div>
+
+      {auth.hosted && auth.session && (
+        <Card
+          title="Account"
+          subtitle="Watchlist, portfolio, plans and journal are stored in your Supabase account"
+          action={<Badge tone="good">cloud</Badge>}
+        >
+          <div className="kv">
+            <div>
+              <span>Email</span>
+              <strong>{auth.session.user.email ?? "—"}</strong>
+            </div>
+            <div>
+              <span>User id</span>
+              <strong className="muted small">{auth.session.user.id.slice(0, 8)}…</strong>
+            </div>
+          </div>
+          <div className="form-actions">
+            <button
+              className="button button-ghost"
+              type="button"
+              onClick={() => void auth.signOut()}
+            >
+              Sign out
+            </button>
+          </div>
+        </Card>
+      )}
 
       <Card
         title="Appearance"

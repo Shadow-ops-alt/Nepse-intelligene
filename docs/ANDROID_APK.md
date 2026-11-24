@@ -234,7 +234,7 @@ The overflow menu has **Check for data updates**. It downloads a mobile pack
 zip from a configurable URL, default:
 
 ```
-https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/NEPSE-Terminal-0.5.0-mobile-pack.zip
+https://github.com/Shadow-ops-alt/Nepse-intelligene/releases/latest/download/NEPSE-Terminal-0.6.0-mobile-pack.zip
 ```
 
 Before installing, every file listed in the archive's `manifest.json` is
@@ -332,3 +332,17 @@ sha256: 6833d6dfa81f782f598b8a32ca84091997e554e8a0c28fa078567ad64150f45b
   bundled or downloaded pack is left untouched.
 - **`adb: no devices/emulators found`**: start the emulator and check
   `adb devices`.
+
+## Hosted Supabase mode
+
+The same APK can sign in to a Supabase account. Put the project URL and the
+publishable key in `apps/mobile/assets/mobile/hosted-config.json` (ignored by
+git; see `hosted-config.example.json`). The local server serves it at
+`/hosted-config.json`; the web UI then shows an email/password login and stores
+watchlist, portfolio, plans, journal, corporate ledger and reconciliation in
+Supabase. Market data still comes from the bundled pack.
+
+The secret/service key must never be placed in this config or the APK. RLS
+enforces ownership. The local server uses the fixed port 41731 so the Supabase
+session survives a cold start. Without the config file the APK stays in the
+offline local mode. See [SUPABASE.md](./SUPABASE.md).

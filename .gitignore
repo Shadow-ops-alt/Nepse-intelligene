@@ -25,3 +25,9 @@ data/*.db-shm
 data/*.db-wal
 apps/mobile/assets/web/
 apps/mobile/assets/pack/
+supabase/.temp/
+supabase/.branches/
+apps/mobile/assets/mobile/hosted-config.json
+.agents/
+.claude/
+skills-lock.json

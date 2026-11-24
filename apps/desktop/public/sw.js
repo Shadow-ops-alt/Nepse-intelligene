@@ -63,6 +63,7 @@ function isCacheable(request) {
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return false;
   if (url.pathname.startsWith("/api/")) return false;
+  if (url.pathname === "/hosted-config.json") return false;
   return true;
 }
 

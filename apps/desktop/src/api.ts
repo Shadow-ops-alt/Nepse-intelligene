@@ -1,7 +1,14 @@
+import { getHostedClient } from "./hosted/client";
+import { hostedRequest, isHostedPath } from "./hosted/request";
+
 export async function api<T>(
   path: string,
   init?: RequestInit,
 ): Promise<T> {
+  const hosted = getHostedClient();
+  if (hosted && isHostedPath(path)) {
+    return hostedRequest<T>(hosted, path, init);
+  }
   const response = await fetch(path, {
     ...init,
     headers: {

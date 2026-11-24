@@ -184,16 +184,12 @@ export function JournalPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [snapshotImage, setSnapshotImage] = useState<string | null>(null);
-  const [existingSnapshotId, setExistingSnapshotId] = useState<number | null>(
+  const [existingSnapshotUrl, setExistingSnapshotUrl] = useState<string | null>(
     null,
   );
   const [snapshotRemoved, setSnapshotRemoved] = useState(false);
 
-  const snapshotPreview =
-    snapshotImage ??
-    (existingSnapshotId === null
-      ? null
-      : `/api/journal/${existingSnapshotId}/snapshot`);
+  const snapshotPreview = snapshotImage ?? existingSnapshotUrl;
 
   // A chart "Snap" navigates here with the image in sessionStorage. Read it
   // once, clear the key, and prefill the form.
@@ -219,7 +215,7 @@ export function JournalPage() {
         return;
       }
       setSnapshotImage(pending.image);
-      setExistingSnapshotId(null);
+      setExistingSnapshotUrl(null);
       setSnapshotRemoved(false);
       if (typeof pending.symbol === "string" && pending.symbol.trim()) {
         const symbol = pending.symbol.trim().toUpperCase();
@@ -311,13 +307,13 @@ export function JournalPage() {
     setEditingId(null);
     setError(null);
     setSnapshotImage(null);
-    setExistingSnapshotId(null);
+    setExistingSnapshotUrl(null);
     setSnapshotRemoved(false);
   }
 
   function removeSnapshot() {
     setSnapshotImage(null);
-    setExistingSnapshotId(null);
+    setExistingSnapshotUrl(null);
     setSnapshotRemoved(true);
   }
 
@@ -348,7 +344,10 @@ export function JournalPage() {
     setEditingId(entry.id);
     setError(null);
     setSnapshotImage(null);
-    setExistingSnapshotId(entry.hasSnapshot ? entry.id : null);
+    setExistingSnapshotUrl(
+      entry.snapshotUrl ??
+        (entry.hasSnapshot ? `/api/journal/${entry.id}/snapshot` : null),
+    );
     setSnapshotRemoved(false);
     setDraft({
       planId: entry.planId === null ? "" : String(entry.planId),
@@ -921,14 +920,14 @@ export function JournalPage() {
                         {entry.hasSnapshot ? (
                           <a
                             className="journal-thumb-link"
-                            href={`/api/journal/${entry.id}/snapshot`}
+                            href={entry.snapshotUrl ?? `/api/journal/${entry.id}/snapshot`}
                             target="_blank"
                             rel="noopener noreferrer"
                             title="Open the chart snapshot full size"
                           >
                             <img
                               className="journal-thumb"
-                              src={`/api/journal/${entry.id}/snapshot`}
+                              src={entry.snapshotUrl ?? `/api/journal/${entry.id}/snapshot`}
                               alt={`Chart snapshot for ${entry.symbol}`}
                               loading="lazy"
                               width={64}

@@ -2,10 +2,12 @@ package com.nepse.terminal.mobile;
 
 import android.content.Context;
 
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -33,6 +35,7 @@ public final class PackUpdater {
 
     private static final long MAX_ZIP_BYTES = 512L * 1024 * 1024;
     private static final long MAX_UNCOMPRESSED_BYTES = 2L * 1024 * 1024 * 1024;
+    private static final long MAX_MANIFEST_BYTES = 1024L * 1024;
     private static final int MAX_ENTRIES = 20_000;
 
     private PackUpdater() {
@@ -40,6 +43,138 @@ public final class PackUpdater {
 
     public interface Progress {
         void update(String message);
+    }
+
+    /** Result of reading an optional pack manifest. */
+    public static final class UpdateInfo {
+        public final String url;
+        public final String version;
+
+        UpdateInfo(String url, String version) {
+            this.url = url;
+            this.version = version;
+        }
+    }
+
+    /**
+     * Reads a pack manifest such as {@code hosted-config.json}'s
+     * {@code packManifestUrl} and returns the latest pack zip.
+     *
+     * Accepted shape (extra fields ignored):
+     *
+     * <pre>
+     * { "version": "0.6.0", "url": "https://host/latest-mobile-pack.zip" }
+     * </pre>
+     *
+     * It also accepts a nested {@code "pack"} object, GitHub-release style
+     * {@code "assets": [{"browser_download_url": ...}]}, and the keys
+     * {@code downloadUrl}, {@code zipUrl}, {@code zip}, {@code archive} and
+     * {@code asset}. Relative URLs resolve against the manifest URL. The zip
+     * is downloaded and verified by {@link #downloadAndInstall} exactly as
+     * before; this method only locates it.
+     */
+    public static UpdateInfo resolveManifest(String manifestUrl) throws IOException {
+        if (!isHttpUrl(manifestUrl)) {
+            throw new IOException("Enter an http:// or https:// manifest URL");
+        }
+        HttpURLConnection connection = null;
+        try {
+            connection = (HttpURLConnection) new URL(manifestUrl).openConnection();
+            connection.setInstanceFollowRedirects(true);
+            connection.setConnectTimeout(15_000);
+            connection.setReadTimeout(30_000);
+            connection.setRequestProperty("User-Agent", "NEPSE-Terminal-Android/0.5.0");
+            connection.setRequestProperty("Accept", "application/json, text/plain, */*");
+            int status = connection.getResponseCode();
+            if (status != HttpURLConnection.HTTP_OK) {
+                throw new IOException("The pack manifest returned HTTP " + status);
+            }
+            byte[] raw;
+            ByteArrayOutputStream buffer = new ByteArrayOutputStream(8 * 1024);
+            try (InputStream input = new BufferedInputStream(connection.getInputStream())) {
+                byte[] chunk = new byte[16 * 1024];
+                int read;
+                while ((read = input.read(chunk)) != -1) {
+                    buffer.write(chunk, 0, read);
+                    if (buffer.size() > MAX_MANIFEST_BYTES) {
+                        throw new IOException("The pack manifest is larger than 1 MB");
+                    }
+                }
+            }
+            raw = buffer.toByteArray();
+            if (raw.length == 0) {
+                throw new IOException("The pack manifest was empty");
+            }
+            JSONObject manifest;
+            try {
+                manifest = new JSONObject(new String(raw, StandardCharsets.UTF_8));
+            } catch (Exception error) {
+                throw new IOException("The pack manifest is not valid JSON");
+            }
+
+            JSONObject source = manifest.optJSONObject("pack");
+            if (source == null) source = manifest;
+            String version = textOf(source, "version");
+            if (version.isEmpty()) version = textOf(manifest, "version");
+
+            String candidate = firstText(source,
+                    "downloadUrl", "zipUrl", "url", "zip", "archive", "asset",
+                    "browser_download_url");
+            if (candidate.isEmpty()) {
+                JSONArray assets = source.optJSONArray("assets");
+                if (assets != null) {
+                    for (int index = 0; index < assets.length() && candidate.isEmpty(); index += 1) {
+                        Object item = assets.opt(index);
+                        if (item instanceof JSONObject) {
+                            candidate = firstText((JSONObject) item,
+                                    "downloadUrl", "zipUrl", "url",
+                                    "browser_download_url");
+                        } else if (item instanceof String) {
+                            candidate = ((String) item).trim();
+                        }
+                    }
+                }
+            }
+            if (candidate.isEmpty()) {
+                throw new IOException("The pack manifest has no download URL");
+            }
+            String resolved = resolve(manifestUrl, candidate);
+            if (!isHttpUrl(resolved)) {
+                throw new IOException("The pack manifest URL is not http(s)");
+            }
+            return new UpdateInfo(resolved, version);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private static String firstText(JSONObject object, String... keys) {
+        for (String key : keys) {
+            String value = textOf(object, key);
+            if (!value.isEmpty()) return value;
+        }
+        return "";
+    }
+
+    private static String textOf(JSONObject object, String key) {
+        if (object == null || !object.has(key) || object.isNull(key)) return "";
+        Object value = object.opt(key);
+        if (value == null || value == JSONObject.NULL) return "";
+        return String.valueOf(value).trim();
+    }
+
+    private static String resolve(String base, String reference) {
+        try {
+            return new URL(new URL(base), reference).toString();
+        } catch (Exception error) {
+            return reference;
+        }
+    }
+
+    private static boolean isHttpUrl(String value) {
+        if (value == null) return false;
+        String lower = value.trim().toLowerCase();
+        return lower.startsWith("http://") || lower.startsWith("https://");
     }
 
     public static File downloadAndInstall(Context context, String url, Progress progress)

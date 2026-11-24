@@ -40,7 +40,7 @@ import java.util.Locale;
 public class MainActivity extends Activity {
 
     private static final String TAG = "NepseMobile";
-    private static final String APP_VERSION = "0.5.0";
+    private static final String APP_VERSION = "0.6.0";
     private static final String PREFS_NAME = "nepse_terminal_mobile";
     private static final String PREF_UPDATE_URL = "update_url";
     private static final String DEFAULT_UPDATE_URL =
@@ -51,6 +51,7 @@ public class MainActivity extends Activity {
     private static final int MENU_RELOAD = 1;
     private static final int MENU_PACK_INFO = 2;
     private static final int MENU_CHECK_UPDATES = 3;
+    private static final int MENU_ENTER_PACK_URL = 4;
 
     private WebView webView;
     private SharedPreferences prefs;
@@ -245,6 +246,9 @@ public class MainActivity extends Activity {
         MenuItem updates = menu.add(Menu.NONE, MENU_CHECK_UPDATES, 3,
                 "Check for data updates");
         updates.setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
+        MenuItem manual = menu.add(Menu.NONE, MENU_ENTER_PACK_URL, 4,
+                "Enter pack URL");
+        manual.setShowAsAction(MenuItem.SHOW_AS_ACTION_NEVER);
         return true;
     }
 
@@ -258,6 +262,9 @@ public class MainActivity extends Activity {
                 showPackInfo();
                 return true;
             case MENU_CHECK_UPDATES:
+                checkForUpdates();
+                return true;
+            case MENU_ENTER_PACK_URL:
                 showUpdateDialog();
                 return true;
             default:
@@ -310,6 +317,77 @@ public class MainActivity extends Activity {
                 .setMessage(text.toString())
                 .setPositiveButton("Close", null)
                 .show();
+    }
+
+    /**
+     * Reads the optional packManifestUrl from hosted-config.json. When it is
+     * set, the app resolves the latest pack zip from that manifest and reuses
+     * the existing download, hash-verify and install path. Without it the
+     * manual URL dialog is shown, exactly as before.
+     */
+    private void checkForUpdates() {
+        final String manifestUrl = HostedConfig.packManifestUrl(this);
+        if (manifestUrl == null) {
+            showUpdateDialog();
+            return;
+        }
+        final AlertDialog progress = new AlertDialog.Builder(this)
+                .setTitle("Data pack update")
+                .setMessage("Checking for a newer data pack")
+                .setCancelable(false)
+                .create();
+        progressDialog = progress;
+        progress.show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    final PackUpdater.UpdateInfo info =
+                            PackUpdater.resolveManifest(manifestUrl);
+                    String current = "";
+                    JSONObject manifest = packStore == null ? null : packStore.manifest();
+                    if (manifest != null) current = manifest.optString("version", "");
+                    final String currentVersion = current;
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            dismissProgress();
+                            if (!info.version.isEmpty()
+                                    && info.version.equals(currentVersion)) {
+                                Toast.makeText(MainActivity.this,
+                                        "Data pack is up to date (v" + currentVersion + ")",
+                                        Toast.LENGTH_LONG).show();
+                                return;
+                            }
+                            startPackUpdate(info.url);
+                        }
+                    });
+                } catch (final Exception error) {
+                    Log.e(TAG, "pack update check failed", error);
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            dismissProgress();
+                            new AlertDialog.Builder(MainActivity.this)
+                                    .setTitle("Update check failed")
+                                    .setMessage(error.getMessage() == null
+                                            ? "The pack manifest could not be read."
+                                            : error.getMessage())
+                                    .setPositiveButton("Close", null)
+                                    .setNeutralButton("Enter a pack URL",
+                                            new DialogInterface.OnClickListener() {
+                                                @Override
+                                                public void onClick(DialogInterface dialog,
+                                                                    int which) {
+                                                    showUpdateDialog();
+                                                }
+                                            })
+                                    .show();
+                        }
+                    });
+                }
+            }
+        }, "nepse-pack-check").start();
     }
 
     private void showUpdateDialog() {

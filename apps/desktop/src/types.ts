@@ -701,6 +701,8 @@ export interface JournalEntry {
   snapshot: unknown;
   /** True when a chart image is attached; fetch it from the snapshot route. */
   hasSnapshot?: boolean;
+  /** Hosted mode returns the image as a data URL instead of the local route. */
+  snapshotUrl?: string;
   openedAt: string | null;
   closedAt: string | null;
   createdAt: string;

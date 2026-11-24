@@ -137,3 +137,11 @@ There is no TLS server in this change.
   the PWA or browser tab is open, as described in `docs/ALERTS.md`.
 - The API remains single-user and unauthenticated by design. Do not expose it
   beyond a trusted local network.
+
+## Hosted mode
+
+The standalone APK supports an optional Supabase account. With
+`hosted-config.json` bundled, it shows an invite-only email/password login and
+stores personal data in Supabase; market data still comes from the local pack.
+Without the config it stays offline/local. See [SUPABASE.md](./SUPABASE.md) and
+[ANDROID_APK.md](./ANDROID_APK.md).

@@ -1,6 +1,6 @@
 {
   "name": "nepse-stock-terminal",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "private": true,
   "type": "module",
   "packageManager": "pnpm@12.16.1",
@@ -31,6 +31,7 @@
     "personal:analyze": "pnpm --filter @stock/personal exec tsx src/cli.ts analyze"
   },
   "devDependencies": {
+    "@supabase/server": "^1.9.2",
     "@types/node": "^26.6.6",
     "concurrently": "^9.2.1",
     "tsx": "^4.23.15",
